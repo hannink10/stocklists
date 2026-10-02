@@ -9,7 +9,7 @@ Erzeugt aus der aktuellen Bestands-CSV automatisch die fertige Excel-Stockliste 
 | `input/` | **Hier die neue CSV ablegen** (genau eine Datei) |
 | `input/archiv/` | bereits verarbeitete CSVs (automatisch) |
 | `template/stocklist_template.xlsx` | Excel-Vorlage (Layout, Farben, Spalten) |
-| `output/` | fertige Stocklisten `Stocklist_JJJJ-MM-TT.xlsx` |
+| `output/` | fertige Stocklisten `Stocklist_<Marke>_JJJJ-MM-TT.xlsx` |
 | `config/mapping.json` | Zuordnung CSV → Excel und Regeln |
 | `Stockliste erstellen.command` | Start per Doppelklick (Mac) |
 | `ANLEITUNG_MAC.md`, `Anleitung Stockliste Mac.pdf` | Anleitung für den Mac (PDF zum Weitergeben/Ausdrucken) |
@@ -68,8 +68,9 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
 - Produktbilder aus Shopify in Spalte „Image“ (verkleinert, damit die Datei klein bleibt).
 - Bestellzeile (orange): Kunde trägt Mengen ein, `Quantity` und `TOTAL` rechnen per Formel; Gesamtsumme am Ende.
-- Titel und Blattname bekommen das aktuelle Datum (`TT.MM.JJJJ`). Der Blattname lautet
-  `Stocklist Reternity TT.MM.JJJJ` (ohne Bindestrich, da Excel max. 31 Zeichen erlaubt).
+- Titel und Blattname bekommen Marke und aktuelles Datum (`TT.MM.JJJJ`), z.B. Titel `STOCK LIST RETERNITY - 02.10.2026`,
+  Blattname `Stocklist Reternity 02.10.2026` (ohne Bindestrich, da Excel max. 31 Zeichen erlaubt; lange Markennamen
+  werden im Blattnamen gekürzt). Ohne Shop-Angabe gilt `excel.default_brand` aus `mapping.json`.
 - Alle Formate (Schrift, Farben, Rahmen, €-Format, Breiten, Höhen, fixierte Spalten/Zeilen) werden aus der Vorlage übernommen.
 
 ## Mapping / Regeln ändern
@@ -98,8 +99,23 @@ Das Script liest aus Shopify (nur lesend) die Produktbilder und die Verkaufszahl
 
 Einrichtung (einmalig):
 1. Im Shopify Dev Dashboard eine App mit den Rechten `read_products` und `read_orders` anlegen, veröffentlichen und im Shop installieren.
-2. `config/shopify.env.example` als `config/shopify.env` kopieren und Shop-Adresse, Client ID und Client Secret eintragen.
-   Diese Datei wird **nie** hochgeladen (`.gitignore`). Alternativ dieselben Werte als Umgebungsvariablen setzen.
+2. `config/shopify.env.example` als `config/shopify.env` kopieren, Client ID und Client Secret eintragen und je Marke
+   eine Zeile `SHOP_<MARKE>=<adresse>.myshopify.com`. Diese Datei wird **nie** hochgeladen (`.gitignore`).
+   Alternativ dieselben Werte als Umgebungsvariablen setzen.
+
+### Mehrere Shops / Marken
+
+Jede Marke bekommt ihre eigene Liste mit Bildern und Verkaufszahlen nur aus ihrem Shop.
+
+- In `config/shopify.env` je Shop eine Zeile, z.B. `SHOP_SAINT_SASS=saint-sass.myshopify.com`. Der Name nach `SHOP_`
+  wird zum Markennamen (`Saint Sass`). Statt der myshopify-Adresse geht auch der Admin-Link
+  (`https://admin.shopify.com/store/saint-sass`).
+- Sind mehrere Shops eingetragen, fragt das Programm beim Start nach der Marke. Ohne Rückfrage:
+  `python generate_stocklist.py --shop "saint sass"`.
+- Alle Shops einer Plus-Organisation können dieselbe App nutzen (Dev Dashboard → App → Distribution → Custom
+  distribution mit „Allow multi-store installs for one Plus organization“ → Installationslink je Shop).
+  Hat ein Shop eine eigene App: `SHOPIFY_CLIENT_ID_<MARKE>` / `SHOPIFY_CLIENT_SECRET_<MARKE>` ergänzen.
+- Das ältere Format mit nur `SHOPIFY_SHOP=…` funktioniert weiter (Marke = `excel.default_brand`).
 
 Einstellungen in `mapping.json` unter `shopify`: `enabled`, `images`, `match_by_name`, `bestseller_days` (Zeitraum für Bestseller; Shopify liefert ohne das Recht `read_all_orders` nur die letzten 60 Tage),
 `image_max_px` (Bildgröße in der Zelle). Bilder werden in `cache/images/` zwischengespeichert und nur neu geladen,
