@@ -38,7 +38,18 @@
     "grand_total_label": "TOTAL",
     "_labels_note": "Texte in der Liste, die von der Vorlage abweichen sollen (Englisch). Leer lassen = Text aus der Vorlage.",
     "header_labels": {"uvp": "RRP"},
-    "stock_row_labels": {"quantity": "Stock", "total": "per size"}
+    "stock_row_labels": {"quantity": "Stock", "total": "per size"},
+    "order_hints": {
+      "_note": "Legende oben + Hinweis beim Klick in die orange Bestellzeile. limit_to_stock: mehr als der Bestand wird abgelehnt.",
+      "enabled": true,
+      "limit_to_stock": true,
+      "legend_stock": "Available stock",
+      "legend_order": "Enter your order quantity here",
+      "prompt_title": "Your order",
+      "prompt": "Enter the quantity you want to order for this size.",
+      "error_title": "Not available",
+      "error": "This quantity is higher than the available stock for this size (grey row above)."
+    }
   },
 
   "sizes": {

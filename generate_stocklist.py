@@ -17,6 +17,7 @@ import shutil
 import sys
 import unicodedata
 from collections import Counter, OrderedDict
+from copy import copy
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -24,10 +25,11 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
 from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.hyperlink import Hyperlink
 from openpyxl.utils.units import pixels_to_EMU
 
@@ -616,6 +618,24 @@ def write_nav_rows(ws, top_row, nav_rows, section_rows, last_col, label):
                 ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
 
 
+def write_legend(ws, art_row, first_col, last_col, hints):
+    """Legende in Zeile 1 neben dem Titel: Farbfeld Bestand (grau) und Farbfeld Bestellung (orange)."""
+    stock_fill = copy(ws.cell(art_row, first_col).fill)
+    order_fill = copy(ws.cell(art_row + 1, first_col).fill)
+    font = Font(name="Arial", size=10, bold=True, color="FF2F2F2F")
+    col = first_col
+    for fill, text, span in ((stock_fill, hints["legend_stock"], 6), (order_fill, hints["legend_order"], 8)):
+        if col + span > last_col:
+            break
+        ws.cell(1, col).fill = fill
+        ws.cell(1, col).border = Border(*(Side(style="thin", color="FF7F7F7F"),) * 4)
+        c = ws.cell(1, col + 1, text)
+        c.font = font
+        c.alignment = Alignment(horizontal="left", vertical="center")
+        ws.merge_cells(start_row=1, start_column=col + 1, end_row=1, end_column=col + span - 1)
+        col += span + 1
+
+
 def write_section_row(ws, row, title, last_col, n=None):
     """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau, mit Artikelzahl."""
     cell = ws.cell(row, 1)
@@ -702,6 +722,8 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     q_letter, t_letter = get_column_letter(q_col), get_column_letter(t_col)
     price_letter = get_column_letter(layout["fixed_cols"]["unit_price"])
 
+    hints = xc.get("order_hints") if xc.get("order_hints", {}).get("enabled") else None
+    first_article_row = None
     row = r_first
     section = None
     section_rows = {}
@@ -740,6 +762,19 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
                 f"SUM({first_size_letter}{bottom}:{last_size_letter}{bottom}))"
             )
             ws.cell(bottom, t_col).value = f'=IF({q_letter}{bottom}="","",{q_letter}{bottom}*{price_letter}{top})'
+        if hints:
+            # Klick in die orange Zeile zeigt einen Hinweis; mehr als der Bestand darüber wird abgelehnt
+            dv = DataValidation(
+                type="whole", operator="between", formula1="0",
+                formula2=f"{first_size_letter}{top}" if hints.get("limit_to_stock") else "100000",
+                allow_blank=True, showInputMessage=True, showErrorMessage=True,
+                promptTitle=hints["prompt_title"][:32], prompt=hints["prompt"][:255],
+                errorTitle=hints["error_title"][:32], error=hints["error"][:255],
+            )
+            dv.add(f"{first_size_letter}{bottom}:{last_size_letter}{bottom}")
+            ws.add_data_validation(dv)
+        if first_article_row is None:
+            first_article_row = top
 
         for col in layout["fixed_cols"].values():
             ws.merge_cells(start_row=top, start_column=col, end_row=bottom, end_column=col)
@@ -751,6 +786,8 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         row += 2
 
     last_row = row - 1
+    if hints and first_article_row:
+        write_legend(ws, first_article_row, size_col[sizes[0]], t_col, hints)
     if nav_rows:
         write_nav_rows(ws, nav_top, nav_rows, section_rows, t_col, gcfg.get("navigation_label", "CONTENTS"))
     if cfg["rules"]["grand_total_row"] and cfg["rules"]["order_formulas"]:
