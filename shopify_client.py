@@ -100,8 +100,12 @@ class ShopifyClient:
 
     # -- Daten --------------------------------------------------------------
 
-    def image_urls_by_sku(self):
-        """SKU -> Bild-URL (Variantenbild, sonst Hauptbild des Produkts)."""
+    def image_variants(self):
+        """Alle Varianten mit Bild: Liste von {sku, title, status, url}.
+
+        Bild = Variantenbild, sonst Hauptbild des Produkts. Titel und Status werden
+        mitgeliefert, damit Artikel auch über den Produktnamen gefunden werden können.
+        """
         query = """
         query($after: String) {
           productVariants(first: 250, after: $after) {
@@ -109,25 +113,28 @@ class ShopifyClient:
             nodes {
               sku
               image { url }
-              product { featuredMedia { preview { image { url } } } }
+              product { title status featuredMedia { preview { image { url } } } }
             }
           }
         }"""
-        urls, after = {}, None
+        variants, after = [], None
         while True:
             data = self.graphql(query, {"after": after})["productVariants"]
             for v in data["nodes"]:
-                sku = (v.get("sku") or "").strip()
-                if not sku:
-                    continue
+                product = v.get("product") or {}
                 url = (v.get("image") or {}).get("url")
                 if not url:
-                    media = (v.get("product") or {}).get("featuredMedia") or {}
+                    media = product.get("featuredMedia") or {}
                     url = ((media.get("preview") or {}).get("image") or {}).get("url")
                 if url:
-                    urls[sku] = url
+                    variants.append({
+                        "sku": (v.get("sku") or "").strip(),
+                        "title": product.get("title") or "",
+                        "status": product.get("status") or "",
+                        "url": url,
+                    })
             if not data["pageInfo"]["hasNextPage"]:
-                return urls
+                return variants
             after = data["pageInfo"]["endCursor"]
 
     def units_sold_by_sku(self, days):
