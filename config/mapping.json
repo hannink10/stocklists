@@ -43,12 +43,24 @@
       "_note": "Legende oben + Hinweis beim Klick in die orange Bestellzeile. limit_to_stock: mehr als der Bestand wird abgelehnt.",
       "enabled": true,
       "limit_to_stock": true,
-      "legend_stock": "Available stock",
-      "legend_order": "Enter your order quantity here",
+      "legend_label": "HOW TO ORDER",
+      "legend_stock": "AVAILABLE STOCK",
+      "legend_order": "YOUR ORDER QTY",
       "prompt_title": "Your order",
       "prompt": "Enter the quantity you want to order for this size.",
       "error_title": "Not available",
-      "error": "This quantity is higher than the available stock for this size (grey row above)."
+      "error": "This quantity is higher than the available stock for this size (grey row above).",
+      "error_none": "This size is not available."
+    },
+    "search": {
+      "_note": "Suchfeld oben links: SKU oder Teil des Namens eintippen, Link springt zum ersten Treffer, alle Treffer werden gelb markiert.",
+      "enabled": true,
+      "label": "SEARCH",
+      "prompt_title": "Search",
+      "prompt": "Type a SKU or part of a product name, then click the link on the right.",
+      "empty_hint": "← type SKU or name",
+      "not_found": "No match",
+      "jump": "→ Jump to"
     }
   },
 
