@@ -574,7 +574,7 @@ def section_summary(articles):
 
 
 def fmt_int(n):
-    return f"{n:,}".replace(",", ".")
+    return f"{n:,}"
 
 
 def nav_layout(sections, widths, first_col, last_col):
@@ -624,7 +624,7 @@ def write_nav_rows(ws, top_row, nav_rows, section_rows, last_col, label):
 def write_section_row(ws, row, title, last_col, n=None, pieces=None):
     """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau, mit Artikel- und Teilezahl."""
     cell = ws.cell(row, 1)
-    cell.value = title.upper() + (f"   ·   {n} Artikel   ·   {fmt_int(pieces)} Teile" if n is not None else "")
+    cell.value = title.upper() + (f"   ·   {n} {'article' if n == 1 else 'articles'}   ·   {fmt_int(pieces)} {'piece' if pieces == 1 else 'pieces'}" if n is not None else "")
     cell.font = Font(name="Arial", size=12, bold=True, color="FF2F2F2F")
     cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
     fill = PatternFill("solid", fgColor="FFD9D9D9")
@@ -696,6 +696,11 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         apply(ws.cell(hr, col), roles["size"]["header"], s)
     apply(ws.cell(hr, q_col), roles["quantity"]["header"], keep_template_value=True)
     apply(ws.cell(hr, t_col), roles["total"]["header"], keep_template_value=True)
+    labels = xc.get("header_labels", {})
+    for role, col in list(layout["fixed_cols"].items()) + [("quantity", q_col), ("total", t_col)]:
+        if labels.get(role):
+            ws.cell(hr, col).value = labels[role]
+    stock_labels = xc.get("stock_row_labels", {})
 
     first_size_letter = get_column_letter(size_col[sizes[0]])
     last_size_letter = get_column_letter(size_col[sizes[-1]])
@@ -729,6 +734,9 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
             apply(ws.cell(bottom, col), roles["size"]["bottom"])
         apply(ws.cell(top, q_col), roles["quantity"]["top"], keep_template_value=True)
         apply(ws.cell(top, t_col), roles["total"]["top"], keep_template_value=True)
+        for role, col in (("quantity", q_col), ("total", t_col)):
+            if stock_labels.get(role):
+                ws.cell(top, col).value = stock_labels[role]
         apply(ws.cell(bottom, q_col), roles["quantity"]["bottom"])
         apply(ws.cell(bottom, t_col), roles["total"]["bottom"])
         if cfg["rules"]["order_formulas"]:
@@ -749,7 +757,7 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
 
     last_row = row - 1
     if nav_rows:
-        write_nav_rows(ws, nav_top, nav_rows, section_rows, t_col, gcfg.get("navigation_label", "INHALT"))
+        write_nav_rows(ws, nav_top, nav_rows, section_rows, t_col, gcfg.get("navigation_label", "CONTENTS"))
     if cfg["rules"]["grand_total_row"] and cfg["rules"]["order_formulas"]:
         ws.row_dimensions[row].height = layout["row_heights"]["bottom"]
         apply(ws.cell(row, q_col - 1), roles["quantity"]["bottom"], xc["grand_total_label"])

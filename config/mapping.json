@@ -35,7 +35,10 @@
     "default_brand": "Reternity",
     "title": "STOCK LIST {BRAND} - {date}",
     "sheet_name": "Stocklist {brand} {date}",
-    "grand_total_label": "TOTAL"
+    "grand_total_label": "TOTAL",
+    "_labels_note": "Texte in der Liste, die von der Vorlage abweichen sollen (Englisch). Leer lassen = Text aus der Vorlage.",
+    "header_labels": {"uvp": "RRP"},
+    "stock_row_labels": {"quantity": "Stock", "total": "per size"}
   },
 
   "sizes": {
@@ -58,27 +61,24 @@
   },
 
   "product_groups": {
-    "_note": "Sortierung nach Produktgruppen. Gruppe kommt aus dem Artikelnamen: die erste passende Regel (von oben) gewinnt.",
+    "_note": "Sortierung nach Produktgruppen. Gruppe kommt aus dem Artikelnamen: die erste passende Regel (von oben) gewinnt. Texte erscheinen so in der Liste (Englisch).",
     "enabled": true,
     "bestseller_top": 10,
     "bestseller_title": "BESTSELLER",
     "navigation": true,
-    "navigation_label": "INHALT",
-    "other_group": "Sonstiges",
-    "order": ["T-Shirts & Tops", "Longsleeves", "Hemden", "Hoodies", "Zip-Hoodies", "Strick", "Jacken", "Hosen", "Shorts", "Accessoires"],
+    "navigation_label": "CONTENTS",
+    "other_group": "Other",
+    "order": ["Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Accessories"],
     "rules": [
-      ["SHORTS", "Shorts"], ["JORTS", "Shorts"],
-      ["KNIT", "Strick"], ["SWEATER", "Strick"], ["JERSEY", "Strick"], ["POLO", "Strick"], ["CARDIGAN", "Strick"],
-      ["ZIP SHIRT", "Hemden"], ["BUTTON SHIRT", "Hemden"], ["OVERSHIRT", "Hemden"],
-      ["ZIP HOODIE", "Zip-Hoodies"], ["HALF ZIP", "Zip-Hoodies"], ["ZIP JACKET", "Zip-Hoodies"],
-      ["HOODIE", "Hoodies"], ["SWEATSHIRT", "Hoodies"], ["CREWNECK", "Hoodies"],
-      ["JACKET", "Jacken"], ["PUFFER", "Jacken"], ["VEST", "Jacken"], ["BOMBER", "Jacken"], ["COAT", "Jacken"],
-      ["LONGSLEEVE", "Longsleeves"],
-      ["T SHIRT", "T-Shirts & Tops"], ["TEE", "T-Shirts & Tops"], ["TANK TOP", "T-Shirts & Tops"], ["TOP", "T-Shirts & Tops"],
-      ["SHIRT", "Hemden"], ["FLANNEL", "Hemden"],
-      ["PANTS", "Hosen"], ["SWEATPANTS", "Hosen"], ["JOGGER", "Hosen"], ["DENIM", "Hosen"], ["JEANS", "Hosen"], ["CARGO", "Hosen"], ["TROUSERS", "Hosen"],
-      ["BEANIE", "Accessoires"], ["CAP", "Accessoires"], ["HAT", "Accessoires"], ["BAG", "Accessoires"], ["BELT", "Accessoires"],
-      ["SOCKS", "Accessoires"], ["SCARF", "Accessoires"], ["WALLET", "Accessoires"]
+      ["KNIT", "Knitwear"], ["SWEATER", "Knitwear"], ["JERSEY", "Knitwear"], ["POLO", "Knitwear"], ["CARDIGAN", "Knitwear"],
+      ["SHORTS", "Pants"], ["JORTS", "Pants"],
+      ["ZIP SHIRT", "Shirts"], ["OVERSHIRT", "Shirts"],
+      ["HOODIE", "Hoodies"], ["HALF ZIP", "Hoodies"], ["ZIP JACKET", "Hoodies"], ["SWEATSHIRT", "Hoodies"], ["CREWNECK", "Hoodies"],
+      ["JACKET", "Jackets"], ["PUFFER", "Jackets"], ["VEST", "Jackets"], ["BOMBER", "Jackets"], ["COAT", "Jackets"],
+      ["SHIRT", "Shirts"], ["LONGSLEEVE", "Shirts"], ["TEE", "Shirts"], ["TANK TOP", "Shirts"], ["TOP", "Shirts"], ["FLANNEL", "Shirts"],
+      ["PANTS", "Pants"], ["SWEATPANTS", "Pants"], ["JOGGER", "Pants"], ["DENIM", "Pants"], ["JEANS", "Pants"], ["CARGO", "Pants"], ["TROUSERS", "Pants"],
+      ["BEANIE", "Accessories"], ["CAP", "Accessories"], ["HAT", "Accessories"], ["BAG", "Accessories"], ["BELT", "Accessories"],
+      ["SOCKS", "Accessories"], ["SCARF", "Accessories"], ["WALLET", "Accessories"]
     ]
   },
 
