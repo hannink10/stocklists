@@ -68,7 +68,11 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 - Unterschiedliche Preise (UNIT PRICE oder UVP) je Größe eines Artikels: Es gilt der häufigste Preis. Bei Gleichstand
   der Preis, den dasselbe Modell in anderen Farben hat (gleicher Name vor dem letzten ` - `), sonst der höhere.
   Jede Abweichung wird als `Hinweis:` gemeldet – den Preis dann in JTL korrigieren.
-- Sortierung: Bestseller zuerst (verkaufte Stück in Shopify, letzte 60 Tage), bei Gleichstand höchster Bestand.
+- Sortierung: oben der Abschnitt **BESTSELLER** mit den 10 meistverkauften Artikeln (Shopify, letzte 60 Tage),
+  danach alle übrigen Artikel nach **Produktgruppen** (T-Shirts & Tops, Longsleeves, Hemden, Hoodies, Zip-Hoodies,
+  Strick, Jacken, Hosen, Shorts, Accessoires) mit einer grauen Überschriftszeile je Gruppe. Innerhalb einer Gruppe:
+  meistverkauft zuerst, bei Gleichstand höchster Bestand.
+  Die Gruppe wird aus dem Artikelnamen erkannt (z.B. `ZIP-HOODIE` → Zip-Hoodies, `KNIT` → Strick).
   Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
 - Produktbilder aus Shopify in Spalte „Image“ (verkleinert, damit die Datei klein bleibt).
 - Bestellzeile (orange): Kunde trägt Mengen ein, `Quantity` und `TOTAL` rechnen per Formel; Gesamtsumme am Ende.
@@ -89,6 +93,11 @@ Alles steht in `config/mapping.json`:
   - `skip_articles_without_stock` – ausverkaufte Artikel weglassen (true/false)
   - `show_zero_stock` – 0 bei vorhandenen, aber leeren Größen anzeigen
   - `sort` – `"bestseller"` (Shopify-Verkäufe), `"stock_desc"` (nach Bestand) oder `"csv"` (Reihenfolge der CSV)
+- **Produktgruppen** unter `product_groups`:
+  - `enabled` – Gruppen ein/aus; `bestseller_top` – Anzahl im Bestseller-Abschnitt (`0` = kein Abschnitt)
+  - `order` – Reihenfolge der Gruppen in der Liste
+  - `rules` – Stichwort → Gruppe; die **erste** passende Regel von oben gewinnt (daher steht `ZIP HOODIE` vor `HOODIE`).
+    Artikel ohne passendes Stichwort landen unter `Sonstiges` und werden als `Hinweis:` gemeldet.
   - `order_formulas`, `grand_total_row` – Formeln in der Bestellzeile / Gesamtsumme
   - `hide_unused_sizes` – Größenspalten ohne Artikel ausblenden (größere Schrift im Druck)
   - `landscape_print` – A4-Querformat, schmale Ränder, auf Seitenbreite skaliert, Kopfzeilen auf jeder Seite

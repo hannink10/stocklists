@@ -24,6 +24,7 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
 from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.utils import get_column_letter
@@ -304,8 +305,19 @@ def resolve_price_conflicts(articles, cfg, warnings):
             )
 
 
-def sort_articles(articles, cfg):
-    """Sortierung (stabil: bei Gleichstand bleibt die CSV-Reihenfolge)."""
+def product_group(name, gcfg):
+    """Produktgruppe aus dem Artikelnamen (ohne Farbe): erste passende Regel gewinnt."""
+    text = " " + normalize_name(model_name(name)) + " "
+    for keyword, group in gcfg["rules"]:
+        if " " + normalize_name(keyword) + " " in text:
+            return group
+    return gcfg["other_group"]
+
+
+def sort_articles(articles, cfg, warnings):
+    """Sortierung (stabil: bei Gleichstand bleibt die CSV-Reihenfolge).
+    Mit Produktgruppen: erst die meistverkauften Artikel (Abschnitt Bestseller), dann je Gruppe.
+    Setzt art["section"] = Überschrift des Abschnitts (None ohne Gruppen)."""
     mode = cfg["rules"]["sort"]
     if mode == "stock_desc":
         articles.sort(key=lambda a: -sum(a["stock"].values()))
@@ -313,6 +325,36 @@ def sort_articles(articles, cfg):
         articles.sort(key=lambda a: (-a["sold"], -sum(a["stock"].values())))
     elif mode != "csv":
         raise StocklistError(f"Unbekannte Sortierung '{mode}' in mapping.json (stock_desc, bestseller, csv).")
+
+    gcfg = cfg.get("product_groups", {})
+    if not gcfg.get("enabled"):
+        for art in articles:
+            art["section"] = None
+        return
+
+    top = []
+    if mode == "bestseller" and gcfg.get("bestseller_top"):
+        top = [a for a in articles if a["sold"] > 0][: gcfg["bestseller_top"]]
+    for art in top:
+        art["section"] = gcfg["bestseller_title"]
+    top_ids = {id(a) for a in top}
+
+    order = list(gcfg["order"])
+    rest = [a for a in articles if id(a) not in top_ids]
+    for art in rest:
+        art["section"] = product_group(art["name"], gcfg)
+        if art["section"] not in order:
+            order.append(art["section"])
+    rest.sort(key=lambda a: order.index(a["section"]))  # stabil: innerhalb der Gruppe bleibt die Sortierung oben
+
+    other = [a for a in rest if a["section"] == gcfg["other_group"]]
+    if other:
+        warnings.append(
+            f"{len(other)} Artikel keiner Produktgruppe zugeordnet ('{gcfg['other_group']}'): "
+            + ", ".join(f"{a['sku']} ({a['name']})" for a in other)
+            + " – ggf. Stichwort in mapping.json unter product_groups.rules ergänzen."
+        )
+    articles[:] = top + rest
 
 
 def load_shops(cfg):
@@ -520,6 +562,19 @@ def apply(cell, info, value=None, keep_template_value=False):
         cell.value = value
 
 
+def write_section_row(ws, row, title, last_col):
+    """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau."""
+    cell = ws.cell(row, 1)
+    cell.value = title.upper()
+    cell.font = Font(name="Arial", size=12, bold=True, color="FF2F2F2F")
+    cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    fill = PatternFill("solid", fgColor="FFD9D9D9")
+    for col in range(1, last_col + 1):
+        ws.cell(row, col).fill = fill
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=last_col)
+    ws.row_dimensions[row].height = 22
+
+
 def write_workbook(template_path, out_path, articles, cfg, today, brand):
     wb = load_workbook(template_path)
     ws = wb.worksheets[0]
@@ -579,7 +634,12 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     price_letter = get_column_letter(layout["fixed_cols"]["unit_price"])
 
     row = r_first
+    section = None
     for art in articles:
+        if art.get("section") and art["section"] != section:
+            section = art["section"]
+            write_section_row(ws, row, section, t_col)
+            row += 1
         top, bottom = row, row + 1
         ws.row_dimensions[top].height = layout["row_heights"]["top"]
         ws.row_dimensions[bottom].height = layout["row_heights"]["bottom"]
@@ -702,7 +762,7 @@ def main():
 
         articles = build_articles(raw, positions, cfg, template_sizes, warnings)
         enrich_from_shopify(articles, cfg, warnings, shop)
-        sort_articles(articles, cfg)
+        sort_articles(articles, cfg, warnings)
         out = output_path(cfg, today, brand)
         sizes = write_workbook(template_path, out, articles, cfg, today, brand)
     except (StocklistError, OSError) as e:

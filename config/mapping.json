@@ -57,6 +57,29 @@
     "landscape_print": false
   },
 
+  "product_groups": {
+    "_note": "Sortierung nach Produktgruppen. Gruppe kommt aus dem Artikelnamen: die erste passende Regel (von oben) gewinnt.",
+    "enabled": true,
+    "bestseller_top": 10,
+    "bestseller_title": "BESTSELLER",
+    "other_group": "Sonstiges",
+    "order": ["T-Shirts & Tops", "Longsleeves", "Hemden", "Hoodies", "Zip-Hoodies", "Strick", "Jacken", "Hosen", "Shorts", "Accessoires"],
+    "rules": [
+      ["SHORTS", "Shorts"], ["JORTS", "Shorts"],
+      ["KNIT", "Strick"], ["SWEATER", "Strick"], ["JERSEY", "Strick"], ["POLO", "Strick"], ["CARDIGAN", "Strick"],
+      ["ZIP SHIRT", "Hemden"], ["BUTTON SHIRT", "Hemden"], ["OVERSHIRT", "Hemden"],
+      ["ZIP HOODIE", "Zip-Hoodies"], ["HALF ZIP", "Zip-Hoodies"], ["ZIP JACKET", "Zip-Hoodies"],
+      ["HOODIE", "Hoodies"], ["SWEATSHIRT", "Hoodies"], ["CREWNECK", "Hoodies"],
+      ["JACKET", "Jacken"], ["PUFFER", "Jacken"], ["VEST", "Jacken"], ["BOMBER", "Jacken"], ["COAT", "Jacken"],
+      ["LONGSLEEVE", "Longsleeves"],
+      ["T SHIRT", "T-Shirts & Tops"], ["TEE", "T-Shirts & Tops"], ["TANK TOP", "T-Shirts & Tops"], ["TOP", "T-Shirts & Tops"],
+      ["SHIRT", "Hemden"], ["FLANNEL", "Hemden"],
+      ["PANTS", "Hosen"], ["SWEATPANTS", "Hosen"], ["JOGGER", "Hosen"], ["DENIM", "Hosen"], ["JEANS", "Hosen"], ["CARGO", "Hosen"], ["TROUSERS", "Hosen"],
+      ["BEANIE", "Accessoires"], ["CAP", "Accessoires"], ["HAT", "Accessoires"], ["BAG", "Accessoires"], ["BELT", "Accessoires"],
+      ["SOCKS", "Accessoires"], ["SCARF", "Accessoires"], ["WALLET", "Accessoires"]
+    ]
+  },
+
   "shopify": {
     "enabled": true,
     "api_version": "2025-10",
