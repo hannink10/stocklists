@@ -79,9 +79,12 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
 - Produktbilder aus Shopify in Spalte „Image“ (verkleinert, damit die Datei klein bleibt).
 - Bestellzeile (orange): Kunde trägt Mengen ein, `Quantity` und `TOTAL` rechnen per Formel; Gesamtsumme am Ende.
+  Orange sind nur Größen mit Bestand; Größen ohne Bestand sind gesperrt.
   Oben neben dem Titel erklärt eine Legende die Farben (grau = Bestand, orange = hier bestellen). Beim Klick in ein
   oranges Feld zeigt Excel einen Hinweis; mehr als der Bestand darüber wird abgelehnt (`excel.order_hints`,
   `limit_to_stock: false` erlaubt Bestellungen über Bestand).
+- **Suche** oben links (`excel.search`): SKU oder Namensteil eintippen, der Link daneben springt zum ersten
+  Treffer, alle Treffer werden gelb markiert. Reine Formeln, keine Makros (in Excel; Numbers/Google Sheets springen evtl. nicht).
 - Alle Texte in der Liste sind Englisch (Gruppen, Überschriften, `RRP` statt `UVP`, `Stock`/`per size`);
   anpassbar in `mapping.json` unter `excel.header_labels`, `excel.stock_row_labels` und `product_groups`.
 - Titel und Blattname bekommen Marke und aktuelles Datum (`TT.MM.JJJJ`), z.B. Titel `STOCK LIST RETERNITY - 02.10.2026`,

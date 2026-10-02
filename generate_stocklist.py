@@ -25,6 +25,9 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
+from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
 from openpyxl.drawing.xdr import XDRPositiveSize2D
@@ -558,7 +561,7 @@ def final_size_list(template_sizes, articles, cfg):
 
 
 def apply(cell, info, value=None, keep_template_value=False):
-    cell._style = info["style"]
+    cell._style = copy(info["style"])  # Kopie: spätere Änderungen an einer Zelle dürfen andere nicht mitändern
     if keep_template_value:
         cell.value = info["value"]
     elif value is not None:
@@ -597,56 +600,132 @@ def nav_layout(sections, widths, first_col, last_col):
     return rows
 
 
-def write_nav_rows(ws, top_row, nav_rows, section_rows, last_col, label):
-    """Inhaltszeile(n) über der Kopfzeile: Klick auf eine Gruppe springt zu ihrer Überschrift."""
-    fill = PatternFill("solid", fgColor="FFF2F2F2")
+DARK = "FF2F2F2F"
+GREY_TEXT = "FF7F7F7F"
+BAR_FILL = PatternFill("solid", fgColor="FFF5F5F5")
+THIN = Side(style="thin", color="FFBFBFBF")
+
+
+def write_top_bar(ws, top_row, n_rows, last_col):
+    """Hellgraue Leiste über der Kopfzeile (Suche links, Inhalt rechts)."""
+    for row in range(top_row, top_row + n_rows):
+        ws.row_dimensions[row].height = 26
+        for col in range(1, last_col + 1):
+            ws.cell(row, col).fill = BAR_FILL
+
+
+def write_nav_links(ws, top_row, nav_rows, section_rows):
+    """Inhalt: Klick auf eine Gruppe springt zu ihrer Überschrift."""
     for i, links in enumerate(nav_rows):
         row = top_row + i
-        ws.row_dimensions[row].height = 20
-        for col in range(1, last_col + 1):
-            ws.cell(row, col).fill = fill
-        if i == 0:
-            c = ws.cell(row, 1, label)
-            c.font = Font(name="Arial", size=10, bold=True, color="FF2F2F2F")
-            c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
         for title, text, start, end in links:
             c = ws.cell(row, start, text)
             c.hyperlink = Hyperlink(ref=c.coordinate, location=f"'{ws.title}'!A{section_rows[title]}", display=text)
-            c.font = Font(name="Arial", size=10, bold=True, underline="single", color="FF1F4E79")
+            c.font = Font(name="Arial", size=10, bold=True, underline="single", color=DARK)
             c.alignment = Alignment(horizontal="center", vertical="center")
             if end > start:
                 ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
 
 
-def write_legend(ws, art_row, first_col, last_col, hints):
-    """Legende in Zeile 1 neben dem Titel: Farbfeld Bestand (grau) und Farbfeld Bestellung (orange)."""
-    stock_fill = copy(ws.cell(art_row, first_col).fill)
-    order_fill = copy(ws.cell(art_row + 1, first_col).fill)
-    font = Font(name="Arial", size=10, bold=True, color="FF2F2F2F")
+def write_search(ws, row, scfg, fixed_cols, helper_col, first_row, last_row):
+    """Suchfeld (SKU oder Namensteil) mit Sprung-Link; passende Artikel werden gelb markiert.
+    Reine Formeln, keine Makros: funktioniert in Excel ohne Freigabe."""
+    sku_l = get_column_letter(fixed_cols["sku"])
+    name_l = get_column_letter(fixed_cols["name"])
+    in_col, in_end = fixed_cols["sku"], fixed_cols["name"]
+    res_col, res_end = fixed_cols["unit_price"], fixed_cols["uvp"]
+    q = f"${sku_l}${row}"
+    rng_sku = f"${sku_l}${first_row}:${sku_l}${last_row}"
+    rng_name = f"${name_l}${first_row}:${name_l}${last_row}"
+    off = first_row - 1
+
+    label = ws.cell(row, 1, scfg["label"])
+    label.font = Font(name="Arial", size=10, bold=True, color=DARK)
+    label.alignment = Alignment(horizontal="right", vertical="center", indent=1)
+
+    box = ws.cell(row, in_col)
+    box.font = Font(name="Arial", size=11, color=DARK)
+    box.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    box.number_format = "@"
+    for col in range(in_col, in_end + 1):
+        ws.cell(row, col).fill = PatternFill("solid", fgColor="FFFFFFFF")
+        ws.cell(row, col).border = Border(
+            top=Side(style="medium", color=DARK), bottom=Side(style="medium", color=DARK),
+            left=Side(style="medium", color=DARK) if col == in_col else Side(),
+            right=Side(style="medium", color=DARK) if col == in_end else Side())
+    ws.merge_cells(start_row=row, start_column=in_col, end_row=row, end_column=in_end)
+    dv = DataValidation(type="textLength", operator="lessThan", formula1="100", allow_blank=True,
+                        showInputMessage=True, promptTitle=scfg["prompt_title"][:32], prompt=scfg["prompt"][:255])
+    dv.add(box.coordinate)
+    ws.add_data_validation(dv)
+
+    # Hilfszelle (ausgeblendete Spalte): Zeile des ersten Treffers – erst exakte SKU, dann SKU-Teil, dann Namensteil
+    helper = ws.cell(row, helper_col)
+    h_ref = f"${get_column_letter(helper_col)}${row}"
+    helper.value = (
+        f'=IF({q}="","",IFERROR(MATCH({q}&"",{rng_sku},0)+{off},'
+        f'IFERROR(MATCH("*"&{q}&"*",{rng_sku},0)+{off},'
+        f'IFERROR(MATCH("*"&{q}&"*",{rng_name},0)+{off},"-"))))'
+    )
+    ws.column_dimensions[get_column_letter(helper_col)].hidden = True
+
+    res = ws.cell(row, res_col)
+    res.value = (
+        f'=IF({q}="","{scfg["empty_hint"]}",IF({h_ref}="-","{scfg["not_found"]}",'
+        f'HYPERLINK("#\'{ws.title}\'!A"&{h_ref},"{scfg["jump"]} "&INDEX(${sku_l}:${sku_l},{h_ref}))))'
+    )
+    res.font = Font(name="Arial", size=10, bold=True, underline="single", color="FF1F4E79")
+    res.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    if res_end > res_col:
+        ws.merge_cells(start_row=row, start_column=res_col, end_row=row, end_column=res_end)
+
+    # Treffer gelb markieren (beide Zeilen eines Artikels)
+    return FormulaRule(
+        formula=[f'AND({q}<>"",OR(ISNUMBER(SEARCH({q},$' + sku_l + "{r}&\" \"&$" + name_l + "{r})),"
+                 f"ISNUMBER(SEARCH({q},$" + sku_l + "{p}&\" \"&$" + name_l + "{p}))))"],
+        fill=PatternFill("solid", fgColor="FFFFF2A8", bgColor="FFFFF2A8"),
+    )
+
+
+def write_legend(ws, row, first_col, last_col, widths, hints, stock_style, order_style):
+    """Legende in Zeile 1: 'HOW TO ORDER' + zwei Farbchips in den Farben der Bestands- und Bestellzeile."""
+    items = [(hints["legend_label"], None), (hints["legend_stock"], stock_style), (hints["legend_order"], order_style)]
     col = first_col
-    for fill, text, span in ((stock_fill, hints["legend_stock"], 6), (order_fill, hints["legend_order"], 8)):
-        if col + span > last_col:
-            break
-        ws.cell(1, col).fill = fill
-        ws.cell(1, col).border = Border(*(Side(style="thin", color="FF7F7F7F"),) * 4)
-        c = ws.cell(1, col + 1, text)
-        c.font = font
-        c.alignment = Alignment(horizontal="left", vertical="center")
-        ws.merge_cells(start_row=1, start_column=col + 1, end_row=1, end_column=col + span - 1)
-        col += span + 1
+    for text, style in items:
+        need, start, have = len(text) * 1.2 + 3, col, 0
+        while have < need and col <= last_col:
+            have += widths[col]
+            col += 1
+        c = ws.cell(row, start)
+        if style is not None:
+            for cc in range(start, col):
+                apply(ws.cell(row, cc), style)
+                ws.cell(row, cc).border = Border(top=THIN, bottom=THIN,
+                                                 left=THIN if cc == start else Side(), right=THIN if cc == col - 1 else Side())
+        c.value = text
+        c.font = Font(name="Arial", size=9, bold=True, color=DARK if style is not None else GREY_TEXT)
+        c.alignment = Alignment(horizontal="center" if style is not None else "right", vertical="center")
+        if col - 1 > start:
+            ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=col - 1)
+        col += 1  # Abstand
 
 
 def write_section_row(ws, row, title, last_col, n=None):
     """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau, mit Artikelzahl."""
     cell = ws.cell(row, 1)
-    cell.value = title.upper() + (f"   ·   {n} {'article' if n == 1 else 'articles'}" if n is not None else "")
-    cell.font = Font(name="Arial", size=12, bold=True, color="FF2F2F2F")
+    parts = [TextBlock(InlineFont(rFont="Arial", sz=13, b=True, color=DARK), title.upper())]
+    if n is not None:
+        parts.append(TextBlock(InlineFont(rFont="Arial", sz=10, color=GREY_TEXT),
+                               f"     {n} {'article' if n == 1 else 'articles'}"))
+    cell.value = CellRichText(parts)
+    cell.font = Font(name="Arial", size=13, bold=True, color=DARK)
     cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    fill = PatternFill("solid", fgColor="FFD9D9D9")
+    fill = PatternFill("solid", fgColor="FFEDEDED")
     for col in range(1, last_col + 1):
         ws.cell(row, col).fill = fill
+        ws.cell(row, col).border = Border(top=Side(style="medium", color=DARK))
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=last_col)
-    ws.row_dimensions[row].height = 22
+    ws.row_dimensions[row].height = 28
 
 
 def write_workbook(template_path, out_path, articles, cfg, today, brand):
@@ -696,12 +775,18 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     ws.column_dimensions[get_column_letter(t_col)].width = roles["total"]["width"]
 
     # Inhaltszeile(n) mit Sprungmarken zwischen Titel und Kopfzeile
+    widths = {c: ws.column_dimensions[get_column_letter(c)].width for c in range(1, t_col + 1)}
     nav_rows = []
     if sections and gcfg.get("navigation", True):
-        widths = {c: ws.column_dimensions[get_column_letter(c)].width for c in range(1, t_col + 1)}
-        nav_rows = nav_layout(sections, widths, 2, t_col)
+        nav_rows = nav_layout(sections, widths, size_col[sizes[0]], t_col)
+    scfg = xc.get("search") if xc.get("search", {}).get("enabled") else None
+    bar_rows = max(len(nav_rows), 1 if scfg else 0)
     nav_top = hr
-    hr, r_first = hr + len(nav_rows), r_first + len(nav_rows)
+    hr, r_first = hr + bar_rows, r_first + bar_rows
+    title_cell = ws.cell(1, 1)
+    title_cell.font = Font(name="Arial", size=18, bold=True, color=DARK)
+    title_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[1].height = 40
 
     # Kopfzeile
     ws.row_dimensions[hr].height = layout["row_heights"]["header"]
@@ -749,6 +834,9 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
                 qty = None
             apply(ws.cell(top, col), roles["size"]["top"], qty)
             apply(ws.cell(bottom, col), roles["size"]["bottom"])
+            if not art["stock"].get(s):
+                # kein Bestand: keine orange Bestellzelle
+                ws.cell(bottom, col).fill = PatternFill("solid", fgColor="FFFFFFFF")
         apply(ws.cell(top, q_col), roles["quantity"]["top"], keep_template_value=True)
         apply(ws.cell(top, t_col), roles["total"]["top"], keep_template_value=True)
         for role, col in (("quantity", q_col), ("total", t_col)):
@@ -756,22 +844,42 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
                 ws.cell(top, col).value = stock_labels[role]
         apply(ws.cell(bottom, q_col), roles["quantity"]["bottom"])
         apply(ws.cell(bottom, t_col), roles["total"]["bottom"])
+        for col in (q_col, t_col):
+            # Ergebnisfelder (Formeln): nicht orange, damit Orange nur "hier eintragen" bedeutet
+            ws.cell(bottom, col).fill = PatternFill("solid", fgColor="FFFFFFFF")
+            ws.cell(bottom, col).font = Font(name="Arial", size=11, bold=True, color=DARK)
         if cfg["rules"]["order_formulas"]:
             ws.cell(bottom, q_col).value = (
                 f'=IF(SUM({first_size_letter}{bottom}:{last_size_letter}{bottom})=0,"",'
                 f"SUM({first_size_letter}{bottom}:{last_size_letter}{bottom}))"
             )
             ws.cell(bottom, t_col).value = f'=IF({q_letter}{bottom}="","",{q_letter}{bottom}*{price_letter}{top})'
-        if hints:
-            # Klick in die orange Zeile zeigt einen Hinweis; mehr als der Bestand darüber wird abgelehnt
-            dv = DataValidation(
-                type="whole", operator="between", formula1="0",
-                formula2=f"{first_size_letter}{top}" if hints.get("limit_to_stock") else "100000",
-                allow_blank=True, showInputMessage=True, showErrorMessage=True,
-                promptTitle=hints["prompt_title"][:32], prompt=hints["prompt"][:255],
-                errorTitle=hints["error_title"][:32], error=hints["error"][:255],
-            )
-            dv.add(f"{first_size_letter}{bottom}:{last_size_letter}{bottom}")
+        # Größen ohne Bestand: Eingabe gesperrt (max. 0); mit Bestand: Hinweis beim Klick, max. = Bestand darüber
+        runs, run = [], None
+        for s, col in size_col.items():
+            has = bool(art["stock"].get(s))
+            if run and run[0] == has and run[2] == col - 1:
+                run[2] = col
+            else:
+                run = [has, col, col]
+                runs.append(run)
+        for has, c1, c2 in runs:
+            l1, l2 = get_column_letter(c1), get_column_letter(c2)
+            if has and hints:
+                dv = DataValidation(
+                    type="whole", operator="between", formula1="0",
+                    formula2=f"{l1}{top}" if hints.get("limit_to_stock") else "100000",
+                    allow_blank=True, showInputMessage=True, showErrorMessage=True,
+                    promptTitle=hints["prompt_title"][:32], prompt=hints["prompt"][:255],
+                    errorTitle=hints["error_title"][:32], error=hints["error"][:255],
+                )
+            elif not has and hints and hints.get("limit_to_stock"):
+                dv = DataValidation(type="whole", operator="equal", formula1="0", allow_blank=True,
+                                    showErrorMessage=True, errorTitle=hints["error_title"][:32],
+                                    error=hints["error_none"][:255])
+            else:
+                continue
+            dv.add(f"{l1}{bottom}:{l2}{bottom}" if c2 > c1 else f"{l1}{bottom}")
             ws.add_data_validation(dv)
         if first_article_row is None:
             first_article_row = top
@@ -786,10 +894,18 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         row += 2
 
     last_row = row - 1
-    if hints and first_article_row:
-        write_legend(ws, first_article_row, size_col[sizes[0]], t_col, hints)
+    if bar_rows:
+        write_top_bar(ws, nav_top, bar_rows, t_col)
     if nav_rows:
-        write_nav_rows(ws, nav_top, nav_rows, section_rows, t_col, gcfg.get("navigation_label", "CONTENTS"))
+        write_nav_links(ws, nav_top, nav_rows, section_rows)
+    if scfg and first_article_row:
+        rule = write_search(ws, nav_top, scfg, layout["fixed_cols"], t_col + 1, r_first, last_row)
+        rng = f"A{r_first}:{t_letter}{last_row}"
+        rule.formula = [rule.formula[0].replace("{r}", str(r_first)).replace("{p}", str(r_first - 1))]
+        ws.conditional_formatting.add(rng, rule)
+    if hints and first_article_row:
+        write_legend(ws, 1, size_col[sizes[0]], t_col, widths, hints,
+                     roles["size"]["top"], roles["size"]["bottom"])
     if cfg["rules"]["grand_total_row"] and cfg["rules"]["order_formulas"]:
         ws.row_dimensions[row].height = layout["row_heights"]["bottom"]
         apply(ws.cell(row, q_col - 1), roles["quantity"]["bottom"], xc["grand_total_label"])
