@@ -11,6 +11,7 @@ Mapping und Regeln stehen in config/mapping.json.
 """
 
 import argparse
+import csv
 import json
 import re
 import shutil
@@ -74,33 +75,57 @@ def find_input_csv(cfg, explicit):
     return csvs[0]
 
 
+def detect_delimiter(path, enc, configured):
+    """Trennzeichen: fest aus mapping.json oder 'auto' (das in den ersten Zeilen häufigste von ; , Tab |)."""
+    if configured != "auto":
+        return configured
+    with open(path, encoding=enc, errors="strict") as f:
+        head = "".join(f.readline() for _ in range(5))
+    counts = {d: head.count(d) for d in (";", ",", "\t", "|")}
+    return max(counts, key=counts.get)
+
+
 def read_csv(path, cfg):
+    """Liest die CSV tolerant: unterschiedlich lange Zeilen (z.B. Titelzeilen über der Kopfzeile) sind erlaubt.
+    Zeilennummern bleiben wie in der Datei (Leerzeilen werden nicht entfernt)."""
     c = cfg["csv"]
     last_error = None
     for enc in c["encodings"]:
         try:
-            raw = pd.read_csv(
-                path, sep=c["delimiter"], encoding=enc, header=None,
-                dtype=str, keep_default_na=False, skip_blank_lines=True,
-            )
-            # z.B. 'E' + Akzent als ein Zeichen 'É' speichern
-            raw = raw.map(lambda v: unicodedata.normalize("NFC", v))
-            return raw, enc
+            sep = detect_delimiter(path, enc, c["delimiter"])
+            with open(path, encoding=enc, newline="") as f:
+                rows = list(csv.reader(f, delimiter=sep))
         except UnicodeDecodeError as e:
             last_error = e
-        except pd.errors.EmptyDataError:
-            raise StocklistError(f"Die CSV-Datei ist leer: {path}")
-        except pd.errors.ParserError as e:
+            continue
+        except csv.Error as e:
             raise StocklistError(f"CSV konnte nicht gelesen werden (Format/Trennzeichen?): {e}")
+        if not any(any(v.strip() for v in r) for r in rows):
+            raise StocklistError(f"Die CSV-Datei ist leer: {path}")
+        width = max(len(r) for r in rows)
+        # z.B. 'E' + Akzent als ein Zeichen 'É' speichern
+        rows = [[unicodedata.normalize("NFC", v) for v in r] + [""] * (width - len(r)) for r in rows]
+        return pd.DataFrame(rows, dtype=str), enc
     raise StocklistError(f"CSV-Encoding nicht erkannt ({', '.join(c['encodings'])}): {last_error}")
 
 
 def parse_number(text, cfg):
-    """Deutsches Zahlenformat ('1.234,50') -> Decimal. Leer -> None."""
-    s = text.strip()
+    """Zahl aus der CSV -> Decimal. Versteht '1.234,50', '1,234.50', '62,94', '62.94', '€ 62,94', '3,00-'.
+    Bei nur einem Trennzeichen entscheidet mapping.json (csv.decimal), außer es folgen genau 3 Ziffern
+    nicht im Sinne von Nachkommastellen (z.B. '1.000' bei Komma als Dezimalzeichen = Tausend)."""
+    s = text.strip().replace("\u2212", "-").replace("\u00a0", "").replace(" ", "")
+    s = re.sub(r"[€$£]|EUR|USD|CHF", "", s, flags=re.I)
     if s == "":
         return None
-    s = s.replace(cfg["csv"]["thousands"], "").replace(cfg["csv"]["decimal"], ".").replace("\u2212", "-")
+    dec = cfg["csv"].get("decimal", ",")
+    if "," in s and "." in s:
+        dec = "," if s.rfind(",") > s.rfind(".") else "."
+    elif "," in s or "." in s:
+        sep = "," if "," in s else "."
+        if sep != dec and not re.fullmatch(r"-?\d{1,3}(" + re.escape(sep) + r"\d{3})+-?", s):
+            dec = sep  # z.B. '62.94' obwohl Komma erwartet: eindeutig Dezimalpunkt
+    thousands = "." if dec == "," else ","
+    s = s.replace(thousands, "").replace(dec, ".")
     if s.endswith("-"):  # nachgestelltes Minus, z.B. '3,00-'
         s = "-" + s[:-1].strip()
     try:
@@ -113,49 +138,93 @@ def parse_number(text, cfg):
 # Prüfung & Aufbereitung
 # ---------------------------------------------------------------------------
 
-def check_header(raw, cfg, warnings):
-    header = [h.strip() for h in raw.iloc[0].tolist()]
-    while header and header[-1] == "":  # abschließendes ';' erzeugt leere Spalte
-        header.pop()
+def norm_header(text):
+    """Spaltenname zum Vergleichen: Großbuchstaben, ohne Akzente/Umlaute-Punkte, Satzzeichen und doppelte Leerzeichen."""
+    text = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode().upper()
+    return re.sub(r"[^A-Z0-9]+", " ", text).strip()
 
-    expected = cfg["csv"]["expected_header"]
-    if header != expected:
-        missing = [h for h in OrderedDict.fromkeys(expected) if header.count(h) < expected.count(h)]
-        new = [h for h in OrderedDict.fromkeys(header) if header.count(h) > expected.count(h)]
-        if missing:
-            warnings.append("Spalten fehlen oder wurden umbenannt: " + ", ".join(missing))
-        if new:
-            warnings.append("Neue/unbekannte Spalten (werden ignoriert): " + ", ".join(new))
-        if not missing and not new:
-            warnings.append("Reihenfolge der CSV-Spalten hat sich geändert.")
 
-    positions = {}
-    errors = []
-    for key, spec in cfg["columns"].items():
-        hits = [i for i, h in enumerate(header) if h == spec["header"]]
-        if len(hits) < spec["occurrence"]:
-            errors.append(
-                f"Pflichtspalte '{spec['header']}' (Vorkommen {spec['occurrence']}) fehlt "
-                f"(gefunden: {len(hits)}x)."
-            )
+ROLE_LABELS = {"sku": "SKU", "name": "Name", "uvp": "UVP/RRP", "unit_price": "Händlerpreis", "stock": "Bestand"}
+
+
+def column_letter_csv(i):
+    return get_column_letter(i + 1)
+
+
+def detect_columns(raw, cfg, brand, warnings):
+    """Findet Kopfzeile und Spalten über ihre Namen (mit Synonymen aus mapping.json, je Marke überschreibbar).
+    Liefert (Zeilenindex der Kopfzeile, {Feld: Spaltenindex}, Beschreibung für die Ausgabe)."""
+    columns = {k: v for k, v in cfg["columns"].items() if not k.startswith("_")}
+    brand_cols = {}
+    for name, bcfg in cfg.get("brands", {}).items():
+        if not name.startswith("_") and normalize_name(name) == normalize_name(brand or ""):
+            brand_cols = bcfg.get("columns", {})
+
+    def aliases(role):
+        spec = dict(columns[role], **brand_cols.get(role, {}))
+        if role in brand_cols and "header" in brand_cols[role]:
+            names = [brand_cols[role]["header"]]  # Marke gibt den Namen fest vor
         else:
-            positions[key] = hits[spec["occurrence"] - 1]
-    # Mehrdeutige Spalten (z.B. 'UNIT PRICE' doppelt): Anzahl muss exakt wie erwartet sein,
-    # sonst ist unklar, welche Spalte gemeint ist.
-    for key, spec in cfg["columns"].items():
-        n_exp = expected.count(spec["header"])
-        n_act = header.count(spec["header"])
-        if n_exp > 1 and n_act != n_exp:
-            errors.append(
-                f"Spalte '{spec['header']}' kommt {n_act}x statt {n_exp}x vor – "
-                "Zuordnung nicht mehr eindeutig. Bitte mapping.json prüfen."
-            )
+            names = [spec["header"]] + spec.get("aliases", [])
+        return [norm_header(n) for n in names], spec
+
+    # Kopfzeile = Zeile (unter den ersten 15) mit den meisten erkannten Feldern
+    best_idx, best_hits = 0, -1
+    for idx in range(min(15, len(raw))):
+        cells = {norm_header(v) for v in raw.iloc[idx].tolist()}
+        hits = sum(any(a in cells for a in aliases(role)[0]) for role in columns)
+        if hits > best_hits:
+            best_idx, best_hits = idx, hits
+    header = [str(v).strip() for v in raw.iloc[best_idx].tolist()]
+    normed = [norm_header(h) for h in header]
+
+    positions, used, info, errors = {}, set(), [], []
+    for role in columns:
+        names, spec = aliases(role)
+        hits = []
+        for n in names:  # Synonyme in Reihenfolge: das erste, das vorkommt, gewinnt
+            hits = [i for i, h in enumerate(normed) if h == n and i not in used]
+            if hits:
+                break
+        if not hits:
+            errors.append(f"Keine Spalte für '{ROLE_LABELS.get(role, role)}' gefunden "
+                          f"(gesucht: {', '.join(spec_names(columns[role], brand_cols.get(role)))}).")
+            continue
+        pick, note = hits[0], ""
+        if len(hits) > 1:
+            values = [tuple(raw.iloc[best_idx + 1:, i].tolist()) for i in hits]
+            occ = spec.get("occurrence", 1)
+            if len(set(values)) == 1:
+                note = f" (von {len(hits)} gleichen Spalten)"
+            elif 1 <= occ <= len(hits):
+                pick, note = hits[occ - 1], f" ({occ}. von {len(hits)} Spalten '{header[hits[0]]}')"
+            else:
+                pick = hits[-1]
+                note = f" (letzte von {len(hits)} Spalten '{header[hits[0]]}')"
+                warnings.append(f"Spalte '{header[hits[0]]}' kommt {len(hits)}x mit unterschiedlichen Werten vor – "
+                                f"verwendet die letzte ({column_letter_csv(pick)}). Bitte prüfen.")
+        positions[role] = pick
+        used.add(pick)
+        info.append(f"{ROLE_LABELS.get(role, role)} = '{header[pick]}' ({column_letter_csv(pick)}){note}")
+
     if errors:
-        raise StocklistError("Spaltenprüfung fehlgeschlagen:\n  - " + "\n  - ".join(errors))
-    return positions
+        found = ", ".join(f"'{h}'" for h in header if h)
+        raise StocklistError(
+            "Spaltenprüfung fehlgeschlagen:\n  - " + "\n  - ".join(errors)
+            + f"\n\nSpalten in der CSV (Zeile {best_idx + 1}): {found}\n"
+            "Lösung: in config/mapping.json den Spaltennamen unter columns.<feld>.aliases ergänzen "
+            "oder für diese Marke unter brands festlegen (siehe README)."
+        )
+    return best_idx, positions, info
 
 
-def build_articles(raw, positions, cfg, template_sizes, warnings):
+def spec_names(spec, brand_spec=None):
+    if brand_spec and "header" in brand_spec:
+        return [brand_spec["header"]]
+    return [spec["header"]] + spec.get("aliases", [])
+
+
+def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0):
     sep = cfg["sizes"]["sku_separator"]
     no_size = cfg["sizes"]["no_size_column"]
     extra = [e["size"] for e in cfg["sizes"]["extra_sizes"]]
@@ -166,7 +235,7 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
     seen_skus = {}
     articles = OrderedDict()
 
-    for idx in range(1, len(raw)):
+    for idx in range(header_idx + 1, len(raw)):
         row = raw.iloc[idx]
         line = idx + 1  # Zeilennummer in der CSV-Datei
         val = {k: str(row.iloc[p]).strip() for k, p in positions.items()}
@@ -982,15 +1051,16 @@ def main():
         csv_path = find_input_csv(cfg, args.csv)
         print(f"CSV:      {csv_path.name}")
         raw, enc = read_csv(csv_path, cfg)
-        print(f"Encoding: {enc}, {len(raw) - 1} Datenzeilen")
-        positions = check_header(raw, cfg, warnings)
+        header_idx, positions, col_info = detect_columns(raw, cfg, brand, warnings)
+        print(f"Encoding: {enc}, {len(raw) - header_idx - 1} Datenzeilen" + (f" (Kopfzeile in Zeile {header_idx + 1})" if header_idx else ""))
+        print("Spalten:  " + "\n          ".join(col_info))
 
         template_path = BASE_DIR / cfg["paths"]["template"]
         if not template_path.is_file():
             raise StocklistError(f"Template nicht gefunden: {template_path}")
         template_sizes = read_template_layout(load_workbook(template_path).worksheets[0], cfg)["sizes"]
 
-        articles = build_articles(raw, positions, cfg, template_sizes, warnings)
+        articles = build_articles(raw, positions, cfg, template_sizes, warnings, header_idx)
         enrich_from_shopify(articles, cfg, warnings, shop)
         sort_articles(articles, cfg, warnings)
         out = output_path(cfg, today, brand)
