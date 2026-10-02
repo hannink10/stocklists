@@ -16,7 +16,7 @@ import re
 import shutil
 import sys
 import unicodedata
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -218,20 +218,21 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
             art = articles[base] = {
                 "sku": base, "name": name, "uvp": uvp, "unit_price": price,
                 "stock": OrderedDict(), "skus": [], "first_line": line,
-                "image": None, "sold": 0,
+                "image": None, "sold": 0, "prices": {"unit_price": [], "uvp": []},
             }
-        else:
-            for key, v in (("name", name), ("uvp", uvp), ("unit_price", price)):
-                if art[key] != v:
-                    errors.append(
-                        f"Zeile {line}: Artikel {base} hat abweichende Angabe bei '{key}' "
-                        f"('{v}' statt '{art[key]}' aus Zeile {art['first_line']})."
-                    )
+        elif art["name"] != name:
+            errors.append(
+                f"Zeile {line}: Artikel {base} hat abweichende Angabe bei 'name' "
+                f"('{name}' statt '{art['name']}' aus Zeile {art['first_line']})."
+            )
+        art["prices"]["unit_price"].append((price, size))
+        art["prices"]["uvp"].append((uvp, size))
         if size in art["stock"]:
             errors.append(f"Zeile {line}: Artikel {base} hat Größe '{size}' mehrfach.")
         art["stock"][size] = int(stock)
         art["skus"].append(sku)
 
+    resolve_price_conflicts(list(articles.values()), cfg, warnings)
     if negative:
         warnings.append(f"{len(negative)} Größe(n) mit negativem Bestand auf 0 gesetzt: " + ", ".join(negative))
     if errors:
@@ -251,6 +252,56 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
                 + ", ".join(f"{a['sku']} ({a['name']})" for a in skipped)
             )
     return result
+
+
+def model_name(name):
+    """Produktname ohne Farbe: 'QUOTE T-SHIRT - CREAM' -> 'QUOTE T-SHIRT'."""
+    return name.rsplit(" - ", 1)[0].strip() if " - " in name else name
+
+
+def resolve_price_conflicts(articles, cfg, warnings):
+    """Haben die Größen eines Artikels unterschiedliche Preise, gilt der häufigste Preis.
+    Bei Gleichstand entscheidet der Preis, den dasselbe Modell in anderen Farben hat;
+    ist es dann immer noch offen, der höhere Preis. Jede Abweichung wird als Hinweis gemeldet."""
+    labels = {"unit_price": cfg["columns"]["unit_price"]["header"], "uvp": cfg["columns"]["uvp"]["header"]}
+    by_model = {}
+    for art in articles:
+        by_model.setdefault(model_name(art["name"]), []).append(art)
+
+    def fmt(v):
+        return f"{v:.2f}".replace(".", ",") + " €"
+
+    for art in articles:
+        for key, entries in art["prices"].items():
+            counts = Counter(v for v, _ in entries)
+            if len(counts) == 1:
+                art[key] = entries[0][0]
+                continue
+            top = max(counts.values())
+            candidates = [v for v, c in counts.items() if c == top]
+            reason = "häufigster Preis"
+            if len(candidates) > 1:
+                siblings = Counter(
+                    v for other in by_model[model_name(art["name"])] if other is not art
+                    for v, _ in other["prices"][key] if v in candidates
+                )
+                if siblings:
+                    best = max(siblings.values())
+                    in_siblings = [v for v in candidates if siblings[v] == best]
+                    if len(in_siblings) == 1:
+                        candidates, reason = in_siblings, "Preis des Modells in anderen Farben"
+            if len(candidates) > 1:
+                reason = "kein eindeutiger Preis, höherer Preis genommen"
+            chosen = max(candidates)
+            art[key] = chosen
+            detail = "; ".join(
+                f"{fmt(v)}: " + ", ".join(sz for pv, sz in entries if pv == v)
+                for v in sorted(counts)
+            )
+            warnings.append(
+                f"Artikel {art['sku']} ({art['name']}): unterschiedliche {labels[key]} je Größe "
+                f"({detail}) – verwendet {fmt(chosen)} ({reason}). Bitte in JTL prüfen."
+            )
 
 
 def sort_articles(articles, cfg):
