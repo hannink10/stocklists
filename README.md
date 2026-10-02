@@ -65,6 +65,9 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 - Größen `S/M`, `L/XL` werden als zusätzliche Spalten nach `XXL` eingefügt – nur wenn sie vorkommen.
 - Negativer Bestand (z.B. überverkauft) wird als 0 gewertet und als `Hinweis:` aufgelistet – kein Abbruch.
 - Artikel ohne jeglichen Bestand werden weggelassen.
+- Unterschiedliche Preise (UNIT PRICE oder UVP) je Größe eines Artikels: Es gilt der häufigste Preis. Bei Gleichstand
+  der Preis, den dasselbe Modell in anderen Farben hat (gleicher Name vor dem letzten ` - `), sonst der höhere.
+  Jede Abweichung wird als `Hinweis:` gemeldet – den Preis dann in JTL korrigieren.
 - Sortierung: Bestseller zuerst (verkaufte Stück in Shopify, letzte 60 Tage), bei Gleichstand höchster Bestand.
   Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
 - Produktbilder aus Shopify in Spalte „Image“ (verkleinert, damit die Datei klein bleibt).
@@ -143,7 +146,7 @@ Bei einem kritischen Problem erstellt das Script **keine** Datei und erklärt, w
 | *'UNIT PRICE' kommt 1x statt 2x vor* | Preisspalten im Export geändert – prüfen, welcher Preis gemeint ist. |
 | *unbekannte Größe* | Größe in `sizes.extra_sizes` ergänzen. |
 | *SKU doppelt* / *ungültige Zahl* / *Pflichtfeld leer* / *ungültiger Bestand* (Kommazahl) | Die genannte CSV-Zeile im Export korrigieren. |
-| *abweichende Angabe* | Ein Artikel hat je Größe unterschiedliche Preise/Namen – Export prüfen. |
+| *abweichende Angabe bei 'name'* | Ein Artikel hat je Größe unterschiedliche Namen – Export prüfen. |
 
 `Hinweis:`-Zeilen sind keine Fehler (z.B. neue, ignorierte Spalten oder weggelassene ausverkaufte Artikel),
 sollten aber kurz gelesen werden.
