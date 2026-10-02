@@ -48,11 +48,20 @@
   "rules": {
     "skip_articles_without_stock": true,
     "show_zero_stock": true,
-    "sort": "stock_desc",
+    "sort": "bestseller",
     "order_formulas": true,
     "grand_total_row": true,
     "hide_unused_sizes": false,
     "landscape_print": false
+  },
+
+  "shopify": {
+    "enabled": true,
+    "api_version": "2025-10",
+    "images": true,
+    "image_max_px": [110, 115],
+    "image_cache_dir": "cache/images",
+    "bestseller_days": 90
   },
 
   "paths": {

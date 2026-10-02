@@ -12,6 +12,8 @@ Erzeugt aus der aktuellen Bestands-CSV automatisch die fertige Excel-Stockliste 
 | `output/` | fertige Stocklisten `Stocklist_JJJJ-MM-TT.xlsx` |
 | `config/mapping.json` | Zuordnung CSV → Excel und Regeln |
 | `generate_stocklist.py` | das Script |
+| `shopify_client.py` | Shopify-Anbindung (Bilder, Verkaufszahlen) |
+| `config/shopify.env` | Shopify-Zugangsdaten (nur lokal, nicht im Repository) |
 
 ## Einmalig: Installation
 
@@ -57,7 +59,9 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 - SKU ohne Größe (Taschen, Beanie) → Spalte `One-Size`.
 - Größen `S/M`, `L/XL` werden als zusätzliche Spalten nach `XXL` eingefügt – nur wenn sie vorkommen.
 - Artikel ohne jeglichen Bestand werden weggelassen.
-- Sortierung: höchster Gesamtbestand zuerst.
+- Sortierung: Bestseller zuerst (verkaufte Stück in Shopify, letzte 90 Tage), bei Gleichstand höchster Bestand.
+  Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
+- Produktbilder aus Shopify in Spalte „Image“ (verkleinert, damit die Datei klein bleibt).
 - Bestellzeile (orange): Kunde trägt Mengen ein, `Quantity` und `TOTAL` rechnen per Formel; Gesamtsumme am Ende.
 - Titel und Blattname bekommen das aktuelle Datum (`TT.MM.JJJJ`). Der Blattname lautet
   `Stocklist Reternity TT.MM.JJJJ` (ohne Bindestrich, da Excel max. 31 Zeichen erlaubt).
@@ -74,7 +78,7 @@ Alles steht in `config/mapping.json`:
 - **Regeln** unter `rules`:
   - `skip_articles_without_stock` – ausverkaufte Artikel weglassen (true/false)
   - `show_zero_stock` – 0 bei vorhandenen, aber leeren Größen anzeigen
-  - `sort` – `"stock_desc"` (nach Bestand) oder `"csv"` (Reihenfolge der CSV)
+  - `sort` – `"bestseller"` (Shopify-Verkäufe), `"stock_desc"` (nach Bestand) oder `"csv"` (Reihenfolge der CSV)
   - `order_formulas`, `grand_total_row` – Formeln in der Bestellzeile / Gesamtsumme
   - `hide_unused_sizes` – Größenspalten ohne Artikel ausblenden (größere Schrift im Druck)
   - `landscape_print` – A4-Querformat, schmale Ränder, auf Seitenbreite skaliert, Kopfzeilen auf jeder Seite
@@ -82,6 +86,22 @@ Alles steht in `config/mapping.json`:
   die Formate aus der ersten Artikelzeile (Zeilen 3/4) und der Kopfzeile (Zeile 2). Kopfzeilen-Texte
   (`Image`, `SKU`, `Name`, `UNIT PRICE`, `UVP`, `Quantity`, `TOTAL`, Größen) nicht umbenennen,
   bzw. dann auch in `excel.column_headers` anpassen.
+
+## Shopify (Bilder & Bestseller)
+
+Das Script liest aus Shopify (nur lesend) die Produktbilder und die Verkaufszahlen je SKU.
+
+Einrichtung (einmalig):
+1. Im Shopify Dev Dashboard eine App mit den Rechten `read_products` und `read_orders` anlegen, veröffentlichen und im Shop installieren.
+2. `config/shopify.env.example` als `config/shopify.env` kopieren und Shop-Adresse, Client ID und Client Secret eintragen.
+   Diese Datei wird **nie** hochgeladen (`.gitignore`). Alternativ dieselben Werte als Umgebungsvariablen setzen.
+
+Einstellungen in `mapping.json` unter `shopify`: `enabled`, `images`, `bestseller_days` (Zeitraum für Bestseller),
+`image_max_px` (Bildgröße in der Zelle). Bilder werden in `cache/images/` zwischengespeichert und nur neu geladen,
+wenn sich das Bild in Shopify ändert.
+
+Ist Shopify nicht erreichbar oder fehlen Zugangsdaten, wird die Liste trotzdem erstellt – ohne Bilder und nach Bestand
+sortiert – und ein `Hinweis:` ausgegeben. Artikel, deren SKU in Shopify nicht gefunden wird, bleiben ohne Bild.
 
 ## Bei Fehlermeldungen
 

@@ -4,3 +4,5 @@ input/archiv/
 ~$*.xlsx
 .DS_Store
 __pycache__/
+config/shopify.env
+cache/

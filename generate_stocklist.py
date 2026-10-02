@@ -23,7 +23,11 @@ from pathlib import Path
 
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.units import pixels_to_EMU
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config" / "mapping.json"
@@ -206,7 +210,8 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
         if art is None:
             art = articles[base] = {
                 "sku": base, "name": name, "uvp": uvp, "unit_price": price,
-                "stock": OrderedDict(), "first_line": line,
+                "stock": OrderedDict(), "skus": [], "first_line": line,
+                "image": None, "sold": 0,
             }
         else:
             for key, v in (("name", name), ("uvp", uvp), ("unit_price", price)):
@@ -218,6 +223,7 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
         if size in art["stock"]:
             errors.append(f"Zeile {line}: Artikel {base} hat Größe '{size}' mehrfach.")
         art["stock"][size] = int(stock)
+        art["skus"].append(sku)
 
     if errors:
         shown = errors[:30]
@@ -235,9 +241,81 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
                 f"{len(skipped)} Artikel ohne Bestand weggelassen: "
                 + ", ".join(f"{a['sku']} ({a['name']})" for a in skipped)
             )
-    if cfg["rules"]["sort"] == "stock_desc":
-        result.sort(key=lambda a: -sum(a["stock"].values()))  # stabil: bei Gleichstand CSV-Reihenfolge
     return result
+
+
+def sort_articles(articles, cfg):
+    """Sortierung (stabil: bei Gleichstand bleibt die CSV-Reihenfolge)."""
+    mode = cfg["rules"]["sort"]
+    if mode == "stock_desc":
+        articles.sort(key=lambda a: -sum(a["stock"].values()))
+    elif mode == "bestseller":
+        articles.sort(key=lambda a: (-a["sold"], -sum(a["stock"].values())))
+    elif mode != "csv":
+        raise StocklistError(f"Unbekannte Sortierung '{mode}' in mapping.json (stock_desc, bestseller, csv).")
+
+
+def enrich_from_shopify(articles, cfg, warnings):
+    """Bilder und Verkaufszahlen aus Shopify. Fehler hier sind nie kritisch."""
+    scfg = cfg.get("shopify", {})
+    if not scfg.get("enabled"):
+        if cfg["rules"]["sort"] == "bestseller":
+            cfg["rules"]["sort"] = "stock_desc"
+        return
+    try:
+        import shopify_client as sc
+    except ImportError as e:
+        warnings.append(f"Shopify-Modul nicht ladbar ({e}) – Liste ohne Bilder/Bestseller.")
+        cfg["rules"]["sort"] = "stock_desc" if cfg["rules"]["sort"] == "bestseller" else cfg["rules"]["sort"]
+        return
+    creds = sc.load_credentials(BASE_DIR / "config" / "shopify.env")
+    if creds is None:
+        warnings.append("Keine Shopify-Zugangsdaten (config/shopify.env) – Liste ohne Bilder, sortiert nach Bestand.")
+        cfg["rules"]["sort"] = "stock_desc" if cfg["rules"]["sort"] == "bestseller" else cfg["rules"]["sort"]
+        return
+    client = sc.ShopifyClient(creds, scfg["api_version"])
+
+    if scfg.get("images"):
+        try:
+            urls = client.image_urls_by_sku()
+            cache = BASE_DIR / scfg["image_cache_dir"]
+            missing = []
+            for art in articles:
+                url = next((urls[s] for s in art["skus"] if s in urls), None)
+                if url is None:
+                    missing.append(art["sku"])
+                    continue
+                try:
+                    art["image"] = sc.thumbnail(url, cache, art["sku"], scfg["image_max_px"])
+                except (sc.ShopifyError, OSError) as e:
+                    missing.append(art["sku"])
+                    warnings.append(f"Bild für {art['sku']} nicht ladbar: {e}")
+            if missing:
+                more = f" … (+{len(missing) - 10} weitere)" if len(missing) > 10 else ""
+                warnings.append(f"{len(missing)} Artikel ohne Shopify-Bild: " + ", ".join(missing[:10]) + more)
+        except sc.ShopifyError as e:
+            warnings.append(f"Shopify-Bilder nicht abrufbar: {e}")
+
+    if cfg["rules"]["sort"] == "bestseller":
+        try:
+            sold = client.units_sold_by_sku(scfg["bestseller_days"])
+            for art in articles:
+                art["sold"] = sum(sold.get(s, 0) for s in art["skus"])
+        except sc.ShopifyError as e:
+            warnings.append(f"Shopify-Verkaufszahlen nicht abrufbar ({e}) – sortiere nach Bestand.")
+            cfg["rules"]["sort"] = "stock_desc"
+
+
+def add_image(ws, path, row, col, box_w, box_h):
+    """Bild zentriert in die (verbundene) Zelle setzen."""
+    img = XLImage(str(path))
+    scale = min(box_w / img.width, box_h / img.height, 1)
+    w, h = int(img.width * scale), int(img.height * scale)
+    img.width, img.height = w, h
+    marker = AnchorMarker(col=col - 1, colOff=pixels_to_EMU((box_w - w) // 2 + 4),
+                          row=row - 1, rowOff=pixels_to_EMU((box_h - h) // 2 + 4))
+    img.anchor = OneCellAnchor(_from=marker, ext=XDRPositiveSize2D(pixels_to_EMU(w), pixels_to_EMU(h)))
+    ws.add_image(img)
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +484,11 @@ def write_workbook(template_path, out_path, articles, cfg, today):
 
         for col in layout["fixed_cols"].values():
             ws.merge_cells(start_row=top, start_column=col, end_row=bottom, end_column=col)
+        if art.get("image"):
+            # Platz = Spaltenbreite x Höhe beider Zeilen, abzüglich Rand
+            box_w = int(roles["image"]["width"] * 8 + 5) - 8  # ca. 8 px je Zeichen bei Aptos Narrow 12
+            box_h = int((layout["row_heights"]["top"] + layout["row_heights"]["bottom"]) * 4 / 3) - 8
+            add_image(ws, art["image"], top, layout["fixed_cols"]["image"], box_w, box_h)
         row += 2
 
     last_row = row - 1
@@ -489,6 +572,8 @@ def main():
         template_sizes = read_template_layout(load_workbook(template_path).worksheets[0], cfg)["sizes"]
 
         articles = build_articles(raw, positions, cfg, template_sizes, warnings)
+        enrich_from_shopify(articles, cfg, warnings)
+        sort_articles(articles, cfg)
         out = output_path(cfg, today)
         sizes = write_workbook(template_path, out, articles, cfg, today)
     except (StocklistError, OSError) as e:
