@@ -50,16 +50,21 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 
 - Die CSV hat **eine Zeile pro Artikel und Größe**; die Excel-Liste **einen Zwei-Zeilen-Block pro Artikel**.
   Die SKU `1032212-XS` wird in Artikelnummer `1032212` und Größe `XS` zerlegt, der Name ohne Größe übernommen.
-- Mapping:
+- **Spalten werden automatisch erkannt** – über ihren Namen, egal in welcher Reihenfolge, Groß-/Kleinschreibung
+  oder mit Satzzeichen. Jede Marke darf ihre CSV also anders aufbauen. Bei jedem Lauf zeigt `Spalten:` an,
+  welche Spalte wofür verwendet wurde. Beispiele für erkannte Namen:
 
-  | CSV | Excel |
-  |---|---|
-  | `SKU` (ohne Größe) | SKU (als Text, keine Zahlenumwandlung) |
-  | `NAME` (ohne Größe) | Name |
-  | `UNIT PRICE` – **die zweite** Spalte dieses Namens | UNIT PRICE |
-  | `UVP` | UVP |
-  | `AVAILABLE` | graue Bestandszeile in der jeweiligen Größenspalte |
-  | `GTIN`, `ORDER`, `TOTAL`, erste `UNIT PRICE` | nicht verwendet |
+  | Feld | erkannte Spaltennamen (Auszug) | Excel |
+  |---|---|---|
+  | SKU | `SKU`, `Artikelnummer`, `Art.-Nr.`, `Item Number` | SKU (ohne Größe, als Text) |
+  | Name | `NAME`, `Bezeichnung`, `Artikelname`, `Product Name` | Name (ohne Größe) |
+  | Händlerpreis | `UNIT PRICE`, `Händlerpreis`, `EK`, `EK netto`, `Wholesale Price` | UNIT PRICE |
+  | UVP | `UVP`, `RRP`, `VK`, `VK brutto`, `Retail Price` | RRP |
+  | Bestand | `AVAILABLE`, `Bestand`, `Lager`, `Verfügbar`, `Stock`, `Qty` | graue Bestandszeile |
+
+  Alle anderen Spalten werden ignoriert. Kommt ein Name doppelt vor (z.B. zweimal `UNIT PRICE`) und die Werte
+  unterscheiden sich, entscheidet `occurrence`. Außerdem automatisch: Trennzeichen (`;` `,` Tab), Zahlenformat
+  (`62,94`, `62.94`, `1.234,50`, `€ 62,94`) und Titelzeilen über der Kopfzeile.
 
 - SKU ohne Größe (Taschen, Beanie) → Spalte `One-Size`.
 - Größen `S/M`, `L/XL` werden als zusätzliche Spalten nach `XXL` eingefügt – nur wenn sie vorkommen.
@@ -96,9 +101,12 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 
 Alles steht in `config/mapping.json`:
 
-- **CSV-Spalte umbenannt** (z.B. `AVAILABLE` heißt jetzt `STOCK`): unter `columns` den `header` anpassen
-  und in `csv.expected_header` die Spaltenliste aktualisieren.
-- **Anderen Preis verwenden**: `columns.unit_price.occurrence` auf `1` (erste) oder `2` (zweite `UNIT PRICE`-Spalte).
+- **Spalte wird nicht erkannt** (Meldung *Keine Spalte für … gefunden* mit Liste der Spalten in der CSV):
+  den Spaltennamen unter `columns.<feld>.aliases` ergänzen – gilt dann für alle Marken.
+- **Eine Marke hat eigene Spaltennamen**: unter `brands` festlegen, z.B.
+  `"Flowers": {"columns": {"unit_price": {"header": "EK Händler"}, "stock": {"header": "Frei"}}}`.
+  Der Markenname ist der aus `config/shopify.env` (Auswahl beim Start).
+- **Anderen Preis verwenden** (Name doppelt): `columns.unit_price.occurrence` auf `1` (erste) oder `2` (zweite Spalte).
 - **Neue Größe** (z.B. `XXXL`): unter `sizes.extra_sizes` ergänzen, z.B. `{"size": "XXXL", "insert_after": "XXL"}`.
 - **Regeln** unter `rules`:
   - `skip_articles_without_stock` – ausverkaufte Artikel weglassen (true/false)
@@ -162,8 +170,8 @@ Bei einem kritischen Problem erstellt das Script **keine** Datei und erklärt, w
 | Meldung | Was tun |
 |---|---|
 | *mehrere CSV-Dateien* | Nur die aktuelle CSV in `input/` lassen. |
-| *Pflichtspalte … fehlt* / *Spalten umbenannt* | Hat sich der CSV-Export geändert? `columns` in `mapping.json` anpassen. |
-| *'UNIT PRICE' kommt 1x statt 2x vor* | Preisspalten im Export geändert – prüfen, welcher Preis gemeint ist. |
+| *Keine Spalte für … gefunden* | Spaltenname unter `columns.<feld>.aliases` ergänzen oder unter `brands` für die Marke festlegen. |
+| *Spalte … kommt mehrfach mit unterschiedlichen Werten vor* | Prüfen, welche Spalte gemeint ist; ggf. `occurrence` setzen. |
 | *unbekannte Größe* | Größe in `sizes.extra_sizes` ergänzen. |
 | *SKU doppelt* / *ungültige Zahl* / *Pflichtfeld leer* / *ungültiger Bestand* (Kommazahl) | Die genannte CSV-Zeile im Export korrigieren. |
 | *abweichende Angabe bei 'name'* | Ein Artikel hat je Größe unterschiedliche Namen – Export prüfen. |

@@ -2,20 +2,23 @@
   "_info": "Bestätigtes Mapping CSV -> Excel-Stockliste. Änderungen siehe README.md.",
 
   "csv": {
-    "delimiter": ";",
+    "_note": "Trennzeichen 'auto' = wird erkannt (; , Tab |). decimal = Dezimalzeichen, wenn nicht eindeutig.",
+    "delimiter": "auto",
     "encodings": ["utf-8-sig", "cp1252"],
-    "decimal": ",",
-    "thousands": ".",
-    "expected_header": ["SKU", "GTIN", "NAME", "UVP", "UNIT PRICE", "UNIT PRICE", "AVAILABLE", "ORDER", "TOTAL"],
-    "ignored_columns": ["GTIN", "ORDER", "TOTAL"]
+    "decimal": ","
   },
 
   "columns": {
-    "sku":        {"header": "SKU",        "occurrence": 1, "_note": "Artikelnummer inkl. Größe, z.B. 1032212-XS"},
-    "name":       {"header": "NAME",       "occurrence": 1, "_note": "Artikelname inkl. Größe am Ende"},
-    "uvp":        {"header": "UVP",        "occurrence": 1, "_note": "-> Excel 'UVP'"},
-    "unit_price": {"header": "UNIT PRICE", "occurrence": 2, "_note": "-> Excel 'UNIT PRICE' (die ZWEITE Spalte 'UNIT PRICE' in der CSV)"},
-    "stock":      {"header": "AVAILABLE",  "occurrence": 1, "_note": "Lagerbestand je Größe -> graue Bestandszeile"}
+    "_note": "Spalten werden über ihren Namen gefunden (Groß-/Kleinschreibung und Satzzeichen egal). Erst 'header', dann 'aliases' in dieser Reihenfolge. occurrence: welche Spalte, wenn der Name mehrfach vorkommt (nur bei unterschiedlichen Werten).",
+    "sku":        {"header": "SKU", "aliases": ["Artikelnummer", "Art.-Nr.", "Art Nr", "ArtNr", "Artikelnr", "Item Number", "Item No", "Article Number", "Article No", "Product Code", "Style Number", "Variant SKU"]},
+    "name":       {"header": "NAME", "aliases": ["Artikelname", "Bezeichnung", "Artikelbezeichnung", "Produktname", "Product Name", "Item Name", "Description", "Beschreibung", "Title", "Titel"]},
+    "uvp":        {"header": "UVP", "aliases": ["RRP", "Retail Price", "Retail", "MSRP", "VK", "VK-Preis", "Verkaufspreis", "VK brutto", "Endkundenpreis", "Preis brutto"]},
+    "unit_price": {"header": "UNIT PRICE", "occurrence": 2, "aliases": ["Händlerpreis", "Haendlerpreis", "EK", "EK-Preis", "EK netto", "Einkaufspreis", "Wholesale", "Wholesale Price", "WHS", "B2B Price", "B2B-Preis", "Net Price", "Nettopreis", "Price"]},
+    "stock":      {"header": "AVAILABLE", "aliases": ["Bestand", "Lager", "Verfügbar", "Verfügbarer Bestand", "Lagerbestand", "Stock", "Available Stock", "Qty", "Quantity", "Menge", "Inventory", "On Hand"]}
+  },
+
+  "brands": {
+    "_note": "Nur falls eine Marke ganz eigene Spaltennamen hat, z.B.: \"Flowers\": {\"columns\": {\"unit_price\": {\"header\": \"EK Händler\"}}}"
   },
 
   "excel": {
