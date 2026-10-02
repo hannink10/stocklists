@@ -68,10 +68,22 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 - Unterschiedliche Preise (UNIT PRICE oder UVP) je Größe eines Artikels: Es gilt der häufigste Preis. Bei Gleichstand
   der Preis, den dasselbe Modell in anderen Farben hat (gleicher Name vor dem letzten ` - `), sonst der höhere.
   Jede Abweichung wird als `Hinweis:` gemeldet – den Preis dann in JTL korrigieren.
-- Sortierung: Bestseller zuerst (verkaufte Stück in Shopify, letzte 60 Tage), bei Gleichstand höchster Bestand.
+- Sortierung: oben der Abschnitt **BESTSELLER** mit den 10 meistverkauften Artikeln (Shopify, letzte 60 Tage),
+  danach alle übrigen Artikel nach **Produktgruppen** (Hoodies, Shirts, Jackets, Pants, Knitwear, Accessories)
+  mit einer grauen Überschriftszeile je Gruppe. Innerhalb einer Gruppe:
+  meistverkauft zuerst, bei Gleichstand höchster Bestand.
+  Die Gruppen-Überschrift zeigt die Artikelzahl (z.B. `HOODIES · 41 articles`).
+  Über der Kopfzeile steht eine **Inhaltszeile**: Klick auf eine Gruppe springt direkt zu ihr
+  (bleibt beim Scrollen sichtbar; abschalten mit `product_groups.navigation: false`).
+  Die Gruppe wird aus dem Artikelnamen erkannt (z.B. `ZIP-HOODIE` → Hoodies, `SHORTS` → Pants, `KNIT` → Knitwear).
   Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
 - Produktbilder aus Shopify in Spalte „Image“ (verkleinert, damit die Datei klein bleibt).
 - Bestellzeile (orange): Kunde trägt Mengen ein, `Quantity` und `TOTAL` rechnen per Formel; Gesamtsumme am Ende.
+  Oben neben dem Titel erklärt eine Legende die Farben (grau = Bestand, orange = hier bestellen). Beim Klick in ein
+  oranges Feld zeigt Excel einen Hinweis; mehr als der Bestand darüber wird abgelehnt (`excel.order_hints`,
+  `limit_to_stock: false` erlaubt Bestellungen über Bestand).
+- Alle Texte in der Liste sind Englisch (Gruppen, Überschriften, `RRP` statt `UVP`, `Stock`/`per size`);
+  anpassbar in `mapping.json` unter `excel.header_labels`, `excel.stock_row_labels` und `product_groups`.
 - Titel und Blattname bekommen Marke und aktuelles Datum (`TT.MM.JJJJ`), z.B. Titel `STOCK LIST RETERNITY - 02.10.2026`,
   Blattname `Stocklist Reternity 02.10.2026` (ohne Bindestrich, da Excel max. 31 Zeichen erlaubt; lange Markennamen
   werden im Blattnamen gekürzt). Ohne Shop-Angabe gilt `excel.default_brand` aus `mapping.json`.
@@ -89,6 +101,11 @@ Alles steht in `config/mapping.json`:
   - `skip_articles_without_stock` – ausverkaufte Artikel weglassen (true/false)
   - `show_zero_stock` – 0 bei vorhandenen, aber leeren Größen anzeigen
   - `sort` – `"bestseller"` (Shopify-Verkäufe), `"stock_desc"` (nach Bestand) oder `"csv"` (Reihenfolge der CSV)
+- **Produktgruppen** unter `product_groups`:
+  - `enabled` – Gruppen ein/aus; `bestseller_top` – Anzahl im Bestseller-Abschnitt (`0` = kein Abschnitt)
+  - `order` – Reihenfolge der Gruppen in der Liste
+  - `rules` – Stichwort → Gruppe; die **erste** passende Regel von oben gewinnt (daher steht `ZIP HOODIE` vor `HOODIE`).
+    Artikel ohne passendes Stichwort landen unter `Other` und werden als `Hinweis:` gemeldet.
   - `order_formulas`, `grand_total_row` – Formeln in der Bestellzeile / Gesamtsumme
   - `hide_unused_sizes` – Größenspalten ohne Artikel ausblenden (größere Schrift im Druck)
   - `landscape_print` – A4-Querformat, schmale Ränder, auf Seitenbreite skaliert, Kopfzeilen auf jeder Seite

@@ -17,6 +17,7 @@ import shutil
 import sys
 import unicodedata
 from collections import Counter, OrderedDict
+from copy import copy
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -24,9 +25,12 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
 from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.hyperlink import Hyperlink
 from openpyxl.utils.units import pixels_to_EMU
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -304,8 +308,19 @@ def resolve_price_conflicts(articles, cfg, warnings):
             )
 
 
-def sort_articles(articles, cfg):
-    """Sortierung (stabil: bei Gleichstand bleibt die CSV-Reihenfolge)."""
+def product_group(name, gcfg):
+    """Produktgruppe aus dem Artikelnamen (ohne Farbe): erste passende Regel gewinnt."""
+    text = " " + normalize_name(model_name(name)) + " "
+    for keyword, group in gcfg["rules"]:
+        if " " + normalize_name(keyword) + " " in text:
+            return group
+    return gcfg["other_group"]
+
+
+def sort_articles(articles, cfg, warnings):
+    """Sortierung (stabil: bei Gleichstand bleibt die CSV-Reihenfolge).
+    Mit Produktgruppen: erst die meistverkauften Artikel (Abschnitt Bestseller), dann je Gruppe.
+    Setzt art["section"] = Überschrift des Abschnitts (None ohne Gruppen)."""
     mode = cfg["rules"]["sort"]
     if mode == "stock_desc":
         articles.sort(key=lambda a: -sum(a["stock"].values()))
@@ -313,6 +328,36 @@ def sort_articles(articles, cfg):
         articles.sort(key=lambda a: (-a["sold"], -sum(a["stock"].values())))
     elif mode != "csv":
         raise StocklistError(f"Unbekannte Sortierung '{mode}' in mapping.json (stock_desc, bestseller, csv).")
+
+    gcfg = cfg.get("product_groups", {})
+    if not gcfg.get("enabled"):
+        for art in articles:
+            art["section"] = None
+        return
+
+    top = []
+    if mode == "bestseller" and gcfg.get("bestseller_top"):
+        top = [a for a in articles if a["sold"] > 0][: gcfg["bestseller_top"]]
+    for art in top:
+        art["section"] = gcfg["bestseller_title"]
+    top_ids = {id(a) for a in top}
+
+    order = list(gcfg["order"])
+    rest = [a for a in articles if id(a) not in top_ids]
+    for art in rest:
+        art["section"] = product_group(art["name"], gcfg)
+        if art["section"] not in order:
+            order.append(art["section"])
+    rest.sort(key=lambda a: order.index(a["section"]))  # stabil: innerhalb der Gruppe bleibt die Sortierung oben
+
+    other = [a for a in rest if a["section"] == gcfg["other_group"]]
+    if other:
+        warnings.append(
+            f"{len(other)} Artikel keiner Produktgruppe zugeordnet ('{gcfg['other_group']}'): "
+            + ", ".join(f"{a['sku']} ({a['name']})" for a in other)
+            + " – ggf. Stichwort in mapping.json unter product_groups.rules ergänzen."
+        )
+    articles[:] = top + rest
 
 
 def load_shops(cfg):
@@ -520,6 +565,90 @@ def apply(cell, info, value=None, keep_template_value=False):
         cell.value = value
 
 
+def section_summary(articles):
+    """Abschnitte in Listenreihenfolge: [(Titel, Anzahl Artikel), ...]."""
+    out = OrderedDict()
+    for art in articles:
+        if art.get("section"):
+            out[art["section"]] = out.get(art["section"], 0) + 1
+    return list(out.items())
+
+
+def nav_layout(sections, widths, first_col, last_col):
+    """Verteilt die Sprungmarken auf Zeilen: je Link so viele Spalten, wie der Text braucht.
+    Liefert [[(Titel, Text, Startspalte, Endspalte), ...], ...] (eine Liste je Zeile)."""
+    rows, cur, col = [], [], first_col
+    for title, n in sections:
+        text = f"{title.upper()} ({n})"
+        need, start, have = len(text) * 1.15 + 3, col, 0
+        while have < need and col <= last_col:
+            have += widths[col]
+            col += 1
+        if have < need and cur:  # passt nicht mehr in diese Zeile
+            rows.append(cur)
+            cur, col = [], first_col
+            start, have = col, 0
+            while have < need and col <= last_col:
+                have += widths[col]
+                col += 1
+        cur.append((title, text, start, col - 1))
+    if cur:
+        rows.append(cur)
+    return rows
+
+
+def write_nav_rows(ws, top_row, nav_rows, section_rows, last_col, label):
+    """Inhaltszeile(n) über der Kopfzeile: Klick auf eine Gruppe springt zu ihrer Überschrift."""
+    fill = PatternFill("solid", fgColor="FFF2F2F2")
+    for i, links in enumerate(nav_rows):
+        row = top_row + i
+        ws.row_dimensions[row].height = 20
+        for col in range(1, last_col + 1):
+            ws.cell(row, col).fill = fill
+        if i == 0:
+            c = ws.cell(row, 1, label)
+            c.font = Font(name="Arial", size=10, bold=True, color="FF2F2F2F")
+            c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        for title, text, start, end in links:
+            c = ws.cell(row, start, text)
+            c.hyperlink = Hyperlink(ref=c.coordinate, location=f"'{ws.title}'!A{section_rows[title]}", display=text)
+            c.font = Font(name="Arial", size=10, bold=True, underline="single", color="FF1F4E79")
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            if end > start:
+                ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
+
+
+def write_legend(ws, art_row, first_col, last_col, hints):
+    """Legende in Zeile 1 neben dem Titel: Farbfeld Bestand (grau) und Farbfeld Bestellung (orange)."""
+    stock_fill = copy(ws.cell(art_row, first_col).fill)
+    order_fill = copy(ws.cell(art_row + 1, first_col).fill)
+    font = Font(name="Arial", size=10, bold=True, color="FF2F2F2F")
+    col = first_col
+    for fill, text, span in ((stock_fill, hints["legend_stock"], 6), (order_fill, hints["legend_order"], 8)):
+        if col + span > last_col:
+            break
+        ws.cell(1, col).fill = fill
+        ws.cell(1, col).border = Border(*(Side(style="thin", color="FF7F7F7F"),) * 4)
+        c = ws.cell(1, col + 1, text)
+        c.font = font
+        c.alignment = Alignment(horizontal="left", vertical="center")
+        ws.merge_cells(start_row=1, start_column=col + 1, end_row=1, end_column=col + span - 1)
+        col += span + 1
+
+
+def write_section_row(ws, row, title, last_col, n=None):
+    """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau, mit Artikelzahl."""
+    cell = ws.cell(row, 1)
+    cell.value = title.upper() + (f"   ·   {n} {'article' if n == 1 else 'articles'}" if n is not None else "")
+    cell.font = Font(name="Arial", size=12, bold=True, color="FF2F2F2F")
+    cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    fill = PatternFill("solid", fgColor="FFD9D9D9")
+    for col in range(1, last_col + 1):
+        ws.cell(row, col).fill = fill
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=last_col)
+    ws.row_dimensions[row].height = 22
+
+
 def write_workbook(template_path, out_path, articles, cfg, today, brand):
     wb = load_workbook(template_path)
     ws = wb.worksheets[0]
@@ -528,6 +657,8 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     sizes = final_size_list(layout["sizes"], articles, cfg)
     roles = layout["roles"]
     hr, r_first = xc["header_row"], xc["first_data_row"]
+    gcfg = cfg.get("product_groups", {})
+    sections = section_summary(articles)
 
     n_fixed = len(layout["fixed_order"])
     size_col = {s: n_fixed + 1 + i for i, s in enumerate(sizes)}
@@ -564,6 +695,14 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     ws.column_dimensions[get_column_letter(q_col)].width = roles["quantity"]["width"]
     ws.column_dimensions[get_column_letter(t_col)].width = roles["total"]["width"]
 
+    # Inhaltszeile(n) mit Sprungmarken zwischen Titel und Kopfzeile
+    nav_rows = []
+    if sections and gcfg.get("navigation", True):
+        widths = {c: ws.column_dimensions[get_column_letter(c)].width for c in range(1, t_col + 1)}
+        nav_rows = nav_layout(sections, widths, 2, t_col)
+    nav_top = hr
+    hr, r_first = hr + len(nav_rows), r_first + len(nav_rows)
+
     # Kopfzeile
     ws.row_dimensions[hr].height = layout["row_heights"]["header"]
     for role, col in layout["fixed_cols"].items():
@@ -572,14 +711,29 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         apply(ws.cell(hr, col), roles["size"]["header"], s)
     apply(ws.cell(hr, q_col), roles["quantity"]["header"], keep_template_value=True)
     apply(ws.cell(hr, t_col), roles["total"]["header"], keep_template_value=True)
+    labels = xc.get("header_labels", {})
+    for role, col in list(layout["fixed_cols"].items()) + [("quantity", q_col), ("total", t_col)]:
+        if labels.get(role):
+            ws.cell(hr, col).value = labels[role]
+    stock_labels = xc.get("stock_row_labels", {})
 
     first_size_letter = get_column_letter(size_col[sizes[0]])
     last_size_letter = get_column_letter(size_col[sizes[-1]])
     q_letter, t_letter = get_column_letter(q_col), get_column_letter(t_col)
     price_letter = get_column_letter(layout["fixed_cols"]["unit_price"])
 
+    hints = xc.get("order_hints") if xc.get("order_hints", {}).get("enabled") else None
+    first_article_row = None
     row = r_first
+    section = None
+    section_rows = {}
+    counts = dict(sections)
     for art in articles:
+        if art.get("section") and art["section"] != section:
+            section = art["section"]
+            write_section_row(ws, row, section, t_col, counts[section])
+            section_rows[section] = row
+            row += 1
         top, bottom = row, row + 1
         ws.row_dimensions[top].height = layout["row_heights"]["top"]
         ws.row_dimensions[bottom].height = layout["row_heights"]["bottom"]
@@ -597,6 +751,9 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
             apply(ws.cell(bottom, col), roles["size"]["bottom"])
         apply(ws.cell(top, q_col), roles["quantity"]["top"], keep_template_value=True)
         apply(ws.cell(top, t_col), roles["total"]["top"], keep_template_value=True)
+        for role, col in (("quantity", q_col), ("total", t_col)):
+            if stock_labels.get(role):
+                ws.cell(top, col).value = stock_labels[role]
         apply(ws.cell(bottom, q_col), roles["quantity"]["bottom"])
         apply(ws.cell(bottom, t_col), roles["total"]["bottom"])
         if cfg["rules"]["order_formulas"]:
@@ -605,6 +762,19 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
                 f"SUM({first_size_letter}{bottom}:{last_size_letter}{bottom}))"
             )
             ws.cell(bottom, t_col).value = f'=IF({q_letter}{bottom}="","",{q_letter}{bottom}*{price_letter}{top})'
+        if hints:
+            # Klick in die orange Zeile zeigt einen Hinweis; mehr als der Bestand darüber wird abgelehnt
+            dv = DataValidation(
+                type="whole", operator="between", formula1="0",
+                formula2=f"{first_size_letter}{top}" if hints.get("limit_to_stock") else "100000",
+                allow_blank=True, showInputMessage=True, showErrorMessage=True,
+                promptTitle=hints["prompt_title"][:32], prompt=hints["prompt"][:255],
+                errorTitle=hints["error_title"][:32], error=hints["error"][:255],
+            )
+            dv.add(f"{first_size_letter}{bottom}:{last_size_letter}{bottom}")
+            ws.add_data_validation(dv)
+        if first_article_row is None:
+            first_article_row = top
 
         for col in layout["fixed_cols"].values():
             ws.merge_cells(start_row=top, start_column=col, end_row=bottom, end_column=col)
@@ -616,6 +786,10 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         row += 2
 
     last_row = row - 1
+    if hints and first_article_row:
+        write_legend(ws, first_article_row, size_col[sizes[0]], t_col, hints)
+    if nav_rows:
+        write_nav_rows(ws, nav_top, nav_rows, section_rows, t_col, gcfg.get("navigation_label", "CONTENTS"))
     if cfg["rules"]["grand_total_row"] and cfg["rules"]["order_formulas"]:
         ws.row_dimensions[row].height = layout["row_heights"]["bottom"]
         apply(ws.cell(row, q_col - 1), roles["quantity"]["bottom"], xc["grand_total_label"])
@@ -702,7 +876,7 @@ def main():
 
         articles = build_articles(raw, positions, cfg, template_sizes, warnings)
         enrich_from_shopify(articles, cfg, warnings, shop)
-        sort_articles(articles, cfg)
+        sort_articles(articles, cfg, warnings)
         out = output_path(cfg, today, brand)
         sizes = write_workbook(template_path, out, articles, cfg, today, brand)
     except (StocklistError, OSError) as e:

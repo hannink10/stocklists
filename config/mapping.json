@@ -35,7 +35,21 @@
     "default_brand": "Reternity",
     "title": "STOCK LIST {BRAND} - {date}",
     "sheet_name": "Stocklist {brand} {date}",
-    "grand_total_label": "TOTAL"
+    "grand_total_label": "TOTAL",
+    "_labels_note": "Texte in der Liste, die von der Vorlage abweichen sollen (Englisch). Leer lassen = Text aus der Vorlage.",
+    "header_labels": {"uvp": "RRP"},
+    "stock_row_labels": {"quantity": "Stock", "total": "per size"},
+    "order_hints": {
+      "_note": "Legende oben + Hinweis beim Klick in die orange Bestellzeile. limit_to_stock: mehr als der Bestand wird abgelehnt.",
+      "enabled": true,
+      "limit_to_stock": true,
+      "legend_stock": "Available stock",
+      "legend_order": "Enter your order quantity here",
+      "prompt_title": "Your order",
+      "prompt": "Enter the quantity you want to order for this size.",
+      "error_title": "Not available",
+      "error": "This quantity is higher than the available stock for this size (grey row above)."
+    }
   },
 
   "sizes": {
@@ -55,6 +69,28 @@
     "grand_total_row": true,
     "hide_unused_sizes": false,
     "landscape_print": false
+  },
+
+  "product_groups": {
+    "_note": "Sortierung nach Produktgruppen. Gruppe kommt aus dem Artikelnamen: die erste passende Regel (von oben) gewinnt. Texte erscheinen so in der Liste (Englisch).",
+    "enabled": true,
+    "bestseller_top": 10,
+    "bestseller_title": "BESTSELLER",
+    "navigation": true,
+    "navigation_label": "CONTENTS",
+    "other_group": "Other",
+    "order": ["Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Accessories"],
+    "rules": [
+      ["KNIT", "Knitwear"], ["SWEATER", "Knitwear"], ["JERSEY", "Knitwear"], ["POLO", "Knitwear"], ["CARDIGAN", "Knitwear"],
+      ["SHORTS", "Pants"], ["JORTS", "Pants"],
+      ["ZIP SHIRT", "Shirts"], ["OVERSHIRT", "Shirts"],
+      ["HOODIE", "Hoodies"], ["HALF ZIP", "Hoodies"], ["ZIP JACKET", "Hoodies"], ["SWEATSHIRT", "Hoodies"], ["CREWNECK", "Hoodies"],
+      ["JACKET", "Jackets"], ["PUFFER", "Jackets"], ["VEST", "Jackets"], ["BOMBER", "Jackets"], ["COAT", "Jackets"],
+      ["SHIRT", "Shirts"], ["LONGSLEEVE", "Shirts"], ["TEE", "Shirts"], ["TANK TOP", "Shirts"], ["TOP", "Shirts"], ["FLANNEL", "Shirts"],
+      ["PANTS", "Pants"], ["SWEATPANTS", "Pants"], ["JOGGER", "Pants"], ["DENIM", "Pants"], ["JEANS", "Pants"], ["CARGO", "Pants"], ["TROUSERS", "Pants"],
+      ["BEANIE", "Accessories"], ["CAP", "Accessories"], ["HAT", "Accessories"], ["BAG", "Accessories"], ["BELT", "Accessories"],
+      ["SOCKS", "Accessories"], ["SCARF", "Accessories"], ["WALLET", "Accessories"]
+    ]
   },
 
   "shopify": {
