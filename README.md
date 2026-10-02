@@ -12,7 +12,7 @@ Erzeugt aus der aktuellen Bestands-CSV automatisch die fertige Excel-Stockliste 
 | `output/` | fertige Stocklisten `Stocklist_JJJJ-MM-TT.xlsx` |
 | `config/mapping.json` | Zuordnung CSV → Excel und Regeln |
 | `Stockliste erstellen.command` | Start per Doppelklick (Mac) |
-| `ANLEITUNG_MAC.md` | Anleitung für den Mac |
+| `ANLEITUNG_MAC.md`, `Anleitung Stockliste Mac.pdf` | Anleitung für den Mac (PDF zum Weitergeben/Ausdrucken) |
 | `generate_stocklist.py` | das Script |
 | `shopify_client.py` | Shopify-Anbindung (Bilder, Verkaufszahlen) |
 | `config/shopify.env` | Shopify-Zugangsdaten (nur lokal, nicht im Repository) |
@@ -20,7 +20,7 @@ Erzeugt aus der aktuellen Bestands-CSV automatisch die fertige Excel-Stockliste 
 ## Einmalig: Installation
 
 **Mac:** einfach `Stockliste erstellen.command` per Doppelklick starten – richtet beim ersten Start alles selbst ein.
-Schritt-für-Schritt-Anleitung: [ANLEITUNG_MAC.md](ANLEITUNG_MAC.md).
+Schritt-für-Schritt-Anleitung: [ANLEITUNG_MAC.md](ANLEITUNG_MAC.md), als PDF: `Anleitung Stockliste Mac.pdf`.
 
 Manuell: Python 3.9+ installieren, dann im Projektordner:
 
