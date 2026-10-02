@@ -11,13 +11,18 @@ Erzeugt aus der aktuellen Bestands-CSV automatisch die fertige Excel-Stockliste 
 | `template/stocklist_template.xlsx` | Excel-Vorlage (Layout, Farben, Spalten) |
 | `output/` | fertige Stocklisten `Stocklist_JJJJ-MM-TT.xlsx` |
 | `config/mapping.json` | Zuordnung CSV → Excel und Regeln |
+| `Stockliste erstellen.command` | Start per Doppelklick (Mac) |
+| `ANLEITUNG_MAC.md` | Anleitung für den Mac |
 | `generate_stocklist.py` | das Script |
 | `shopify_client.py` | Shopify-Anbindung (Bilder, Verkaufszahlen) |
 | `config/shopify.env` | Shopify-Zugangsdaten (nur lokal, nicht im Repository) |
 
 ## Einmalig: Installation
 
-Python 3.9+ installieren, dann im Projektordner:
+**Mac:** einfach `Stockliste erstellen.command` per Doppelklick starten – richtet beim ersten Start alles selbst ein.
+Schritt-für-Schritt-Anleitung: [ANLEITUNG_MAC.md](ANLEITUNG_MAC.md).
+
+Manuell: Python 3.9+ installieren, dann im Projektordner:
 
 ```
 pip install -r requirements.txt
@@ -26,7 +31,7 @@ pip install -r requirements.txt
 ## Neue Stockliste erstellen
 
 1. Neue CSV in `input/` legen (alte CSV vorher entfernen – wird normalerweise automatisch archiviert).
-2. Im Projektordner ausführen:
+2. Doppelklick auf `Stockliste erstellen.command` (Mac) oder im Projektordner ausführen:
    ```
    python generate_stocklist.py
    ```
