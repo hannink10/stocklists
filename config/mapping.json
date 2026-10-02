@@ -59,6 +59,7 @@
     "enabled": true,
     "api_version": "2025-10",
     "images": true,
+    "match_by_name": true,
     "image_max_px": [110, 115],
     "image_cache_dir": "cache/images",
     "bestseller_days": 90

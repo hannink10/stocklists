@@ -96,12 +96,19 @@ Einrichtung (einmalig):
 2. `config/shopify.env.example` als `config/shopify.env` kopieren und Shop-Adresse, Client ID und Client Secret eintragen.
    Diese Datei wird **nie** hochgeladen (`.gitignore`). Alternativ dieselben Werte als Umgebungsvariablen setzen.
 
-Einstellungen in `mapping.json` unter `shopify`: `enabled`, `images`, `bestseller_days` (Zeitraum für Bestseller),
+Einstellungen in `mapping.json` unter `shopify`: `enabled`, `images`, `match_by_name`, `bestseller_days` (Zeitraum für Bestseller),
 `image_max_px` (Bildgröße in der Zelle). Bilder werden in `cache/images/` zwischengespeichert und nur neu geladen,
 wenn sich das Bild in Shopify ändert.
 
 Ist Shopify nicht erreichbar oder fehlen Zugangsdaten, wird die Liste trotzdem erstellt – ohne Bilder und nach Bestand
-sortiert – und ein `Hinweis:` ausgegeben. Artikel, deren SKU in Shopify nicht gefunden wird, bleiben ohne Bild.
+sortiert – und ein `Hinweis:` ausgegeben.
+
+Zuordnung der Bilder: zuerst über die SKU mit Größe (`1032212-XS`), dann über die SKU ohne Größe (`1032212`,
+so sind viele Artikel in Shopify angelegt), zuletzt über den Produktnamen (ohne Groß-/Kleinschreibung, Akzente
+und Satzzeichen). Gibt es mehrere Treffer, gewinnt das Produkt mit gleichem Namen, dann das aktive vor archivierten.
+Über den Namen zugeordnete Bilder werden im `Hinweis:` aufgelistet – kurz prüfen. Den Namensabgleich schaltet
+`match_by_name: false` ab. Artikel, die so nicht gefunden werden, bleiben ohne Bild.
+Auch die Bestseller-Zahlen zählen Verkäufe unter der SKU ohne Größe mit.
 
 ## Bei Fehlermeldungen
 

@@ -255,6 +255,21 @@ def sort_articles(articles, cfg):
         raise StocklistError(f"Unbekannte Sortierung '{mode}' in mapping.json (stock_desc, bestseller, csv).")
 
 
+def normalize_name(name):
+    """Name für den Abgleich mit Shopify: ohne Akzente, Satzzeichen und Groß-/Kleinschreibung."""
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().upper()
+    return re.sub(r"[^A-Z0-9]+", " ", name).strip()
+
+
+def pick_image(candidates, name):
+    """Bild-URL aus mehreren Shopify-Treffern: gleicher Name vor anderem Namen, aktiv vor archiviert."""
+    if not candidates:
+        return None
+    key = normalize_name(name)
+    best = min(candidates, key=lambda v: (normalize_name(v["title"]) != key, v["status"] != "ACTIVE"))
+    return best["url"]
+
+
 def enrich_from_shopify(articles, cfg, warnings):
     """Bilder und Verkaufszahlen aus Shopify. Fehler hier sind nie kritisch."""
     scfg = cfg.get("shopify", {})
@@ -277,11 +292,22 @@ def enrich_from_shopify(articles, cfg, warnings):
 
     if scfg.get("images"):
         try:
-            urls = client.image_urls_by_sku()
+            variants = client.image_variants()
+            by_sku, by_name = {}, {}
+            for v in variants:
+                by_sku.setdefault(v["sku"], []).append(v)
+                by_name.setdefault(normalize_name(v["title"]), []).append(v)
             cache = BASE_DIR / scfg["image_cache_dir"]
-            missing = []
+            missing, via_name = [], []
             for art in articles:
-                url = next((urls[s] for s in art["skus"] if s in urls), None)
+                # 1. SKU mit Größe, 2. SKU ohne Größe (so sind viele Artikel in Shopify angelegt)
+                cands = [v for s in art["skus"] + [art["sku"]] for v in by_sku.get(s, [])]
+                if not cands and scfg.get("match_by_name", True):
+                    # 3. Produktname
+                    cands = by_name.get(normalize_name(art["name"]), [])
+                    if cands:
+                        via_name.append(f"{art['sku']} ({art['name']})")
+                url = pick_image(cands, art["name"])
                 if url is None:
                     missing.append(art["sku"])
                     continue
@@ -290,6 +316,9 @@ def enrich_from_shopify(articles, cfg, warnings):
                 except (sc.ShopifyError, OSError) as e:
                     missing.append(art["sku"])
                     warnings.append(f"Bild für {art['sku']} nicht ladbar: {e}")
+            if via_name:
+                warnings.append(f"{len(via_name)} Artikel-Bild(er) über den Produktnamen zugeordnet "
+                                "(SKU nicht in Shopify): " + ", ".join(via_name))
             if missing:
                 more = f" … (+{len(missing) - 10} weitere)" if len(missing) > 10 else ""
                 warnings.append(f"{len(missing)} Artikel ohne Shopify-Bild: " + ", ".join(missing[:10]) + more)
@@ -300,7 +329,8 @@ def enrich_from_shopify(articles, cfg, warnings):
         try:
             sold = client.units_sold_by_sku(scfg["bestseller_days"])
             for art in articles:
-                art["sold"] = sum(sold.get(s, 0) for s in art["skus"])
+                # auch Verkäufe unter der SKU ohne Größe zählen
+                art["sold"] = sum(sold.get(s, 0) for s in set(art["skus"]) | {art["sku"]})
         except sc.ShopifyError as e:
             warnings.append(f"Shopify-Verkaufszahlen nicht abrufbar ({e}) – sortiere nach Bestand.")
             cfg["rules"]["sort"] = "stock_desc"
