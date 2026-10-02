@@ -21,6 +21,7 @@ import hashlib
 import io
 import json
 import os
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +30,21 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from PIL import Image as PILImage
+
+
+def _ssl_context():
+    # Python von python.org (macOS) bringt keine Zertifikate mit -> CERTIFICATE_VERIFY_FAILED.
+    # Daher zusätzlich die Zertifikate aus dem Paket certifi laden (System-Zertifikate bleiben gültig).
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(certifi.where())
+    except (ImportError, OSError):
+        pass
+    return ctx
+
+
+SSL_CONTEXT = _ssl_context()
 
 
 class ShopifyError(Exception):
@@ -91,7 +107,7 @@ class ShopifyClient:
     def _post(self, url, data, headers):
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout, context=SSL_CONTEXT) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")[:300]
@@ -209,7 +225,7 @@ def thumbnail(url, cache_dir, key, max_px, timeout=30):
         sep = "&" if "?" in url else "?"
         src = f"{url}{sep}width={max_px[0] * 3}"  # Shopify-CDN liefert direkt eine kleinere Version
         try:
-            with urllib.request.urlopen(src, timeout=timeout) as resp:
+            with urllib.request.urlopen(src, timeout=timeout, context=SSL_CONTEXT) as resp:
                 raw = resp.read()
         except urllib.error.URLError as e:
             raise ShopifyError(f"Bild nicht ladbar: {e}")
