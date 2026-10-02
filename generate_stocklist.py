@@ -418,8 +418,19 @@ def write_workbook(template_path, out_path, articles, cfg, today):
               f"=SUM({t_letter}{r_first}:{t_letter}{last_row})")
 
     ws.freeze_panes = ws.cell(r_first, n_fixed + 1).coordinate
+    if cfg["rules"].get("hide_unused_sizes"):
+        used = {s for a in articles for s in a["stock"]}
+        for s, col in size_col.items():
+            if s not in used:
+                ws.column_dimensions[get_column_letter(col)].hidden = True
+
     if cfg["rules"]["landscape_print"]:
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
         ws.page_setup.orientation = "landscape"
+        ws.page_margins.left = ws.page_margins.right = 0.4
+        ws.page_margins.top = ws.page_margins.bottom = 0.5
+        ws.page_margins.header = ws.page_margins.footer = 0.3
+        ws.print_options.horizontalCentered = True
         ws.page_setup.fitToWidth = 1
         ws.page_setup.fitToHeight = 0
         ws.sheet_properties.pageSetUpPr.fitToPage = True

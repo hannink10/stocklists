@@ -51,6 +51,7 @@
     "sort": "stock_desc",
     "order_formulas": true,
     "grand_total_row": true,
+    "hide_unused_sizes": false,
     "landscape_print": false
   },
 

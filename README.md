@@ -76,7 +76,8 @@ Alles steht in `config/mapping.json`:
   - `show_zero_stock` – 0 bei vorhandenen, aber leeren Größen anzeigen
   - `sort` – `"stock_desc"` (nach Bestand) oder `"csv"` (Reihenfolge der CSV)
   - `order_formulas`, `grand_total_row` – Formeln in der Bestellzeile / Gesamtsumme
-  - `landscape_print` – Querformat, auf Seitenbreite skaliert, Kopfzeilen auf jeder Seite
+  - `hide_unused_sizes` – Größenspalten ohne Artikel ausblenden (größere Schrift im Druck)
+  - `landscape_print` – A4-Querformat, schmale Ränder, auf Seitenbreite skaliert, Kopfzeilen auf jeder Seite
 - **Layout ändern** (Farben, Breiten, Schrift): direkt in `template/stocklist_template.xlsx` – das Script übernimmt
   die Formate aus der ersten Artikelzeile (Zeilen 3/4) und der Kopfzeile (Zeile 2). Kopfzeilen-Texte
   (`Image`, `SKU`, `Name`, `UNIT PRICE`, `UVP`, `Quantity`, `TOTAL`, Größen) nicht umbenennen,
