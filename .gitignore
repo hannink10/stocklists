@@ -1,0 +1,8 @@
+# Erzeugte Stocklisten und archivierte CSVs nicht versionieren
+output/*.xlsx
+input/archiv/
+~$*.xlsx
+.DS_Store
+__pycache__/
+config/shopify.env
+cache/

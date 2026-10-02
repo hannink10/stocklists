@@ -1,0 +1,74 @@
+{
+  "_info": "Bestätigtes Mapping CSV -> Excel-Stockliste. Änderungen siehe README.md.",
+
+  "csv": {
+    "delimiter": ";",
+    "encodings": ["utf-8-sig", "cp1252"],
+    "decimal": ",",
+    "thousands": ".",
+    "expected_header": ["SKU", "GTIN", "NAME", "UVP", "UNIT PRICE", "UNIT PRICE", "AVAILABLE", "ORDER", "TOTAL"],
+    "ignored_columns": ["GTIN", "ORDER", "TOTAL"]
+  },
+
+  "columns": {
+    "sku":        {"header": "SKU",        "occurrence": 1, "_note": "Artikelnummer inkl. Größe, z.B. 1032212-XS"},
+    "name":       {"header": "NAME",       "occurrence": 1, "_note": "Artikelname inkl. Größe am Ende"},
+    "uvp":        {"header": "UVP",        "occurrence": 1, "_note": "-> Excel 'UVP'"},
+    "unit_price": {"header": "UNIT PRICE", "occurrence": 2, "_note": "-> Excel 'UNIT PRICE' (die ZWEITE Spalte 'UNIT PRICE' in der CSV)"},
+    "stock":      {"header": "AVAILABLE",  "occurrence": 1, "_note": "Lagerbestand je Größe -> graue Bestandszeile"}
+  },
+
+  "excel": {
+    "header_row": 2,
+    "first_data_row": 3,
+    "column_headers": {
+      "image": "Image",
+      "sku": "SKU",
+      "name": "Name",
+      "unit_price": "UNIT PRICE",
+      "uvp": "UVP",
+      "quantity": "Quantity",
+      "total": "TOTAL"
+    },
+    "date_placeholder": "xx.xx.",
+    "date_format": "%d.%m.%Y",
+    "sheet_name": "Stocklist Reternity {date}",
+    "grand_total_label": "TOTAL"
+  },
+
+  "sizes": {
+    "sku_separator": "-",
+    "no_size_column": "One-Size",
+    "extra_sizes": [
+      {"size": "S/M",  "insert_after": "XXL"},
+      {"size": "L/XL", "insert_after": "S/M"}
+    ]
+  },
+
+  "rules": {
+    "skip_articles_without_stock": true,
+    "show_zero_stock": true,
+    "sort": "bestseller",
+    "order_formulas": true,
+    "grand_total_row": true,
+    "hide_unused_sizes": false,
+    "landscape_print": false
+  },
+
+  "shopify": {
+    "enabled": true,
+    "api_version": "2025-10",
+    "images": true,
+    "image_max_px": [110, 115],
+    "image_cache_dir": "cache/images",
+    "bestseller_days": 60
+  },
+
+  "paths": {
+    "input_dir": "input",
+    "archive_dir": "input/archiv",
+    "template": "template/stocklist_template.xlsx",
+    "output_dir": "output",
+    "output_filename": "Stocklist_{date_iso}.xlsx"
+  }
+}
