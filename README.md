@@ -59,7 +59,7 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 - SKU ohne Größe (Taschen, Beanie) → Spalte `One-Size`.
 - Größen `S/M`, `L/XL` werden als zusätzliche Spalten nach `XXL` eingefügt – nur wenn sie vorkommen.
 - Artikel ohne jeglichen Bestand werden weggelassen.
-- Sortierung: Bestseller zuerst (verkaufte Stück in Shopify, letzte 90 Tage), bei Gleichstand höchster Bestand.
+- Sortierung: Bestseller zuerst (verkaufte Stück in Shopify, letzte 60 Tage), bei Gleichstand höchster Bestand.
   Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
 - Produktbilder aus Shopify in Spalte „Image“ (verkleinert, damit die Datei klein bleibt).
 - Bestellzeile (orange): Kunde trägt Mengen ein, `Quantity` und `TOTAL` rechnen per Formel; Gesamtsumme am Ende.
@@ -96,7 +96,7 @@ Einrichtung (einmalig):
 2. `config/shopify.env.example` als `config/shopify.env` kopieren und Shop-Adresse, Client ID und Client Secret eintragen.
    Diese Datei wird **nie** hochgeladen (`.gitignore`). Alternativ dieselben Werte als Umgebungsvariablen setzen.
 
-Einstellungen in `mapping.json` unter `shopify`: `enabled`, `images`, `bestseller_days` (Zeitraum für Bestseller),
+Einstellungen in `mapping.json` unter `shopify`: `enabled`, `images`, `bestseller_days` (Zeitraum für Bestseller; Shopify liefert ohne das Recht `read_all_orders` nur die letzten 60 Tage),
 `image_max_px` (Bildgröße in der Zelle). Bilder werden in `cache/images/` zwischengespeichert und nur neu geladen,
 wenn sich das Bild in Shopify ändert.
 
