@@ -255,6 +255,39 @@ def sort_articles(articles, cfg):
         raise StocklistError(f"Unbekannte Sortierung '{mode}' in mapping.json (stock_desc, bestseller, csv).")
 
 
+def load_shops(cfg):
+    try:
+        import shopify_client as sc
+    except ImportError:
+        return []
+    return sc.load_shops(BASE_DIR / "config" / "shopify.env", cfg["excel"]["default_brand"])
+
+
+def select_shop(shops, wanted):
+    """Shop/Marke für diesen Lauf: per --shop, bei mehreren Shops sonst per Auswahl im Fenster."""
+    if wanted:
+        key = normalize_name(wanted)
+        for s in shops:
+            if key in (normalize_name(s["name"]), normalize_name(s["shop"]), normalize_name(s["shop"].split(".")[0])):
+                return s
+        raise StocklistError(f"Shop '{wanted}' nicht in config/shopify.env. Vorhanden: "
+                             + ", ".join(s["name"] for s in shops))
+    if len(shops) <= 1:
+        return shops[0] if shops else None
+    if not sys.stdin.isatty():
+        raise StocklistError("Mehrere Shops in config/shopify.env – bitte mit --shop <Marke> wählen: "
+                             + ", ".join(s["name"] for s in shops))
+    print("Für welche Marke soll die Stockliste erstellt werden?")
+    for i, s in enumerate(shops, 1):
+        print(f"  {i}  {s['name']}")
+    while True:
+        answer = input("Nummer eingeben und Enter drücken: ").strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(shops):
+            print()
+            return shops[int(answer) - 1]
+        print(f"Bitte eine Zahl von 1 bis {len(shops)} eingeben.")
+
+
 def normalize_name(name):
     """Name für den Abgleich mit Shopify: ohne Akzente, Satzzeichen und Groß-/Kleinschreibung."""
     name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().upper()
@@ -270,10 +303,12 @@ def pick_image(candidates, name):
     return best["url"]
 
 
-def enrich_from_shopify(articles, cfg, warnings):
+def enrich_from_shopify(articles, cfg, warnings, shop):
     """Bilder und Verkaufszahlen aus Shopify. Fehler hier sind nie kritisch."""
     scfg = cfg.get("shopify", {})
-    if not scfg.get("enabled"):
+    if not scfg.get("enabled") or shop is None or not (shop["client_id"] and shop["client_secret"]):
+        if scfg.get("enabled"):
+            warnings.append("Keine Shopify-Zugangsdaten (config/shopify.env) – Liste ohne Bilder, sortiert nach Bestand.")
         if cfg["rules"]["sort"] == "bestseller":
             cfg["rules"]["sort"] = "stock_desc"
         return
@@ -283,12 +318,7 @@ def enrich_from_shopify(articles, cfg, warnings):
         warnings.append(f"Shopify-Modul nicht ladbar ({e}) – Liste ohne Bilder/Bestseller.")
         cfg["rules"]["sort"] = "stock_desc" if cfg["rules"]["sort"] == "bestseller" else cfg["rules"]["sort"]
         return
-    creds = sc.load_credentials(BASE_DIR / "config" / "shopify.env")
-    if creds is None:
-        warnings.append("Keine Shopify-Zugangsdaten (config/shopify.env) – Liste ohne Bilder, sortiert nach Bestand.")
-        cfg["rules"]["sort"] = "stock_desc" if cfg["rules"]["sort"] == "bestseller" else cfg["rules"]["sort"]
-        return
-    client = sc.ShopifyClient(creds, scfg["api_version"])
+    client = sc.ShopifyClient(shop, scfg["api_version"])
 
     if scfg.get("images"):
         try:
@@ -430,7 +460,7 @@ def apply(cell, info, value=None, keep_template_value=False):
         cell.value = value
 
 
-def write_workbook(template_path, out_path, articles, cfg, today):
+def write_workbook(template_path, out_path, articles, cfg, today, brand):
     wb = load_workbook(template_path)
     ws = wb.worksheets[0]
     xc = cfg["excel"]
@@ -455,12 +485,16 @@ def write_workbook(template_path, out_path, articles, cfg, today):
 
     # Titel + Blattname
     date_str = today.strftime(xc["date_format"])
-    if layout["title"]:
+    if xc.get("title"):
+        ws.cell(1, 1).value = xc["title"].format(BRAND=brand.upper(), brand=brand, date=date_str)
+    elif layout["title"]:
         ws.cell(1, 1).value = str(layout["title"]).replace(xc["date_placeholder"], date_str)
-    sheet_name = xc["sheet_name"].format(date=date_str)
+    sheet_name = xc["sheet_name"].format(brand=brand, date=date_str)
     if len(sheet_name) > 31:
-        raise StocklistError(f"Blattname '{sheet_name}' ist länger als 31 Zeichen (Excel-Limit).")
-    ws.title = sheet_name
+        # Excel erlaubt max. 31 Zeichen: Markenname kürzen
+        cut = len(sheet_name) - 31
+        sheet_name = xc["sheet_name"].format(brand=brand[:max(1, len(brand) - cut)].strip(), date=date_str)
+    ws.title = sheet_name[:31]
 
     # Spaltenbreiten
     for role, col in layout["fixed_cols"].items():
@@ -553,10 +587,11 @@ def write_workbook(template_path, out_path, articles, cfg, today):
     return sizes
 
 
-def output_path(cfg, today):
+def output_path(cfg, today, brand):
     out_dir = BASE_DIR / cfg["paths"]["output_dir"]
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = cfg["paths"]["output_filename"].format(date_iso=today.isoformat())
+    safe_brand = re.sub(r"[^A-Za-z0-9]+", "-", normalize_name(brand).title()).strip("-")
+    name = cfg["paths"]["output_filename"].format(brand=safe_brand, date_iso=today.isoformat())
     path = out_dir / name
     version = 2
     while path.exists():
@@ -584,12 +619,16 @@ def main():
     parser.add_argument("--csv", help="bestimmte CSV-Datei verwenden")
     parser.add_argument("--no-archive", action="store_true",
                         help="CSV nach Erfolg nicht nach input/archiv verschieben")
+    parser.add_argument("--shop", help="Marke/Shop aus config/shopify.env (bei mehreren Shops)")
     args = parser.parse_args()
 
     cfg = load_config()
     today = date.today()
     warnings = []
     try:
+        shop = select_shop(load_shops(cfg), args.shop)
+        brand = shop["name"] if shop else cfg["excel"]["default_brand"]
+        print(f"Marke:    {brand}" + (f" ({shop['shop']})" if shop else ""))
         csv_path = find_input_csv(cfg, args.csv)
         print(f"CSV:      {csv_path.name}")
         raw, enc = read_csv(csv_path, cfg)
@@ -602,10 +641,10 @@ def main():
         template_sizes = read_template_layout(load_workbook(template_path).worksheets[0], cfg)["sizes"]
 
         articles = build_articles(raw, positions, cfg, template_sizes, warnings)
-        enrich_from_shopify(articles, cfg, warnings)
+        enrich_from_shopify(articles, cfg, warnings, shop)
         sort_articles(articles, cfg)
-        out = output_path(cfg, today)
-        sizes = write_workbook(template_path, out, articles, cfg, today)
+        out = output_path(cfg, today, brand)
+        sizes = write_workbook(template_path, out, articles, cfg, today, brand)
     except (StocklistError, OSError) as e:
         print("\nFEHLER – es wurde KEINE Stockliste erstellt.\n")
         print(e)

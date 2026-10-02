@@ -32,7 +32,9 @@
     },
     "date_placeholder": "xx.xx.",
     "date_format": "%d.%m.%Y",
-    "sheet_name": "Stocklist Reternity {date}",
+    "default_brand": "Reternity",
+    "title": "STOCK LIST {BRAND} - {date}",
+    "sheet_name": "Stocklist {brand} {date}",
     "grand_total_label": "TOTAL"
   },
 
@@ -70,6 +72,6 @@
     "archive_dir": "input/archiv",
     "template": "template/stocklist_template.xlsx",
     "output_dir": "output",
-    "output_filename": "Stocklist_{date_iso}.xlsx"
+    "output_filename": "Stocklist_{brand}_{date_iso}.xlsx"
   }
 }

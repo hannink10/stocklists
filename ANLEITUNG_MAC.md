@@ -28,7 +28,8 @@
 1. Die neue CSV aus dem Warenwirtschaftssystem in den Ordner **`input`** legen.
    Dort darf nur **diese eine** CSV liegen.
 2. **Doppelklick auf `Stockliste erstellen.command`.**
-   Ein Terminal-Fenster öffnet sich und zeigt den Fortschritt.
+   Ein Terminal-Fenster öffnet sich. Sind mehrere Marken eingerichtet, fragt es zuerst, für welche Marke die
+   Liste erstellt wird: Nummer eintippen und Enter drücken. Danach zeigt es den Fortschritt.
 3. Am Ende steht **„Fertig: output/Stocklist_…xlsx“**, und der Finder zeigt die fertige Datei an.
    Diese Datei an den Kunden schicken.
 4. Terminal-Fenster schließen.

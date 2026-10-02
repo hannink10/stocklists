@@ -1,11 +1,20 @@
 """Shopify-Anbindung (nur lesend): Produktbilder und Verkaufszahlen je SKU.
 
-Zugangsdaten kommen aus Umgebungsvariablen oder aus config/shopify.env
-(diese Datei ist in .gitignore und wird nie hochgeladen):
+Zugangsdaten kommen aus config/shopify.env oder aus Umgebungsvariablen
+(config/shopify.env ist in .gitignore und wird nie hochgeladen):
 
-    SHOPIFY_SHOP=reternity.myshopify.com
     SHOPIFY_CLIENT_ID=...
     SHOPIFY_CLIENT_SECRET=...
+
+    # ein Shop pro Marke: SHOP_<Marke>=<adresse>.myshopify.com
+    SHOP_RETERNITY=reternity.myshopify.com
+    SHOP_SAINT_SASS=saint-sass.myshopify.com
+
+    # nur falls ein Shop eine eigene App hat:
+    SHOPIFY_CLIENT_ID_SAINT_SASS=...
+    SHOPIFY_CLIENT_SECRET_SAINT_SASS=...
+
+Älteres Format mit nur einem Shop (SHOPIFY_SHOP=...) funktioniert weiter.
 """
 
 import hashlib
@@ -26,7 +35,8 @@ class ShopifyError(Exception):
     pass
 
 
-def load_credentials(env_file):
+def _read_env(env_file):
+    """Werte aus config/shopify.env, ergänzt um gleichnamige Umgebungsvariablen."""
     values = {}
     if env_file.is_file():
         for line in env_file.read_text(encoding="utf-8").splitlines():
@@ -34,19 +44,44 @@ def load_credentials(env_file):
             if line and not line.startswith("#") and "=" in line:
                 key, value = line.split("=", 1)
                 values[key.strip()] = value.strip().strip('"').strip("'")
-    creds = {}
-    for key in ("SHOPIFY_SHOP", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET"):
-        creds[key] = os.environ.get(key) or values.get(key)
-    if not all(creds.values()):
-        return None
-    return creds
+    for key, value in sorted(os.environ.items()):
+        if key.startswith(("SHOP_", "SHOPIFY_")) and value:
+            values[key] = value
+    return values
+
+
+def normalize_domain(value):
+    """Shop-Adresse vereinheitlichen: auch Admin-Links und Kurzformen zu <name>.myshopify.com."""
+    value = value.strip().replace("https://", "").replace("http://", "").strip("/")
+    if value.startswith("admin.shopify.com/store/"):
+        value = value.split("/")[2]
+    value = value.split("/")[0]
+    return value if "." in value else f"{value}.myshopify.com"
+
+
+def load_shops(env_file, default_name):
+    """Liste der konfigurierten Shops: [{name, shop, client_id, client_secret}, …]."""
+    values = _read_env(env_file)
+    entries = [(k[len("SHOP_"):], v) for k, v in values.items() if k.startswith("SHOP_") and v]
+    if not entries and values.get("SHOPIFY_SHOP"):
+        entries = [(default_name.upper().replace(" ", "_"), values["SHOPIFY_SHOP"])]
+    shops = []
+    for key, domain in entries:
+        key = key.strip().upper().replace(" ", "_")
+        shops.append({
+            "name": key.replace("_", " ").title(),
+            "shop": normalize_domain(domain),
+            "client_id": values.get(f"SHOPIFY_CLIENT_ID_{key}") or values.get("SHOPIFY_CLIENT_ID"),
+            "client_secret": values.get(f"SHOPIFY_CLIENT_SECRET_{key}") or values.get("SHOPIFY_CLIENT_SECRET"),
+        })
+    return shops
 
 
 class ShopifyClient:
-    def __init__(self, creds, api_version, timeout=30):
-        self.shop = creds["SHOPIFY_SHOP"].replace("https://", "").strip("/")
-        self.client_id = creds["SHOPIFY_CLIENT_ID"]
-        self.client_secret = creds["SHOPIFY_CLIENT_SECRET"]
+    def __init__(self, shop, api_version, timeout=30):
+        self.shop = normalize_domain(shop["shop"])
+        self.client_id = shop["client_id"]
+        self.client_secret = shop["client_secret"]
         self.api_version = api_version
         self.timeout = timeout
         self._token = None
