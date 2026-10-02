@@ -72,7 +72,7 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   danach alle übrigen Artikel nach **Produktgruppen** (Hoodies, Shirts, Jackets, Pants, Knitwear, Accessories)
   mit einer grauen Überschriftszeile je Gruppe. Innerhalb einer Gruppe:
   meistverkauft zuerst, bei Gleichstand höchster Bestand.
-  Die Gruppen-Überschrift zeigt Artikel- und Teilezahl (z.B. `HOODIES · 41 articles · 1,741 pieces`).
+  Die Gruppen-Überschrift zeigt die Artikelzahl (z.B. `HOODIES · 41 articles`).
   Über der Kopfzeile steht eine **Inhaltszeile**: Klick auf eine Gruppe springt direkt zu ihr
   (bleibt beim Scrollen sichtbar; abschalten mit `product_groups.navigation: false`).
   Die Gruppe wird aus dem Artikelnamen erkannt (z.B. `ZIP-HOODIE` → Hoodies, `SHORTS` → Pants, `KNIT` → Knitwear).

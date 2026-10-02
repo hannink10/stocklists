@@ -564,24 +564,19 @@ def apply(cell, info, value=None, keep_template_value=False):
 
 
 def section_summary(articles):
-    """Abschnitte in Listenreihenfolge: [(Titel, Anzahl Artikel, Anzahl Teile), ...]."""
+    """Abschnitte in Listenreihenfolge: [(Titel, Anzahl Artikel), ...]."""
     out = OrderedDict()
     for art in articles:
         if art.get("section"):
-            n, pieces = out.get(art["section"], (0, 0))
-            out[art["section"]] = (n + 1, pieces + sum(art["stock"].values()))
-    return [(t, n, p) for t, (n, p) in out.items()]
-
-
-def fmt_int(n):
-    return f"{n:,}"
+            out[art["section"]] = out.get(art["section"], 0) + 1
+    return list(out.items())
 
 
 def nav_layout(sections, widths, first_col, last_col):
     """Verteilt die Sprungmarken auf Zeilen: je Link so viele Spalten, wie der Text braucht.
     Liefert [[(Titel, Text, Startspalte, Endspalte), ...], ...] (eine Liste je Zeile)."""
     rows, cur, col = [], [], first_col
-    for title, n, _ in sections:
+    for title, n in sections:
         text = f"{title.upper()} ({n})"
         need, start, have = len(text) * 1.15 + 3, col, 0
         while have < need and col <= last_col:
@@ -621,10 +616,10 @@ def write_nav_rows(ws, top_row, nav_rows, section_rows, last_col, label):
                 ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
 
 
-def write_section_row(ws, row, title, last_col, n=None, pieces=None):
-    """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau, mit Artikel- und Teilezahl."""
+def write_section_row(ws, row, title, last_col, n=None):
+    """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau, mit Artikelzahl."""
     cell = ws.cell(row, 1)
-    cell.value = title.upper() + (f"   ·   {n} {'article' if n == 1 else 'articles'}   ·   {fmt_int(pieces)} {'piece' if pieces == 1 else 'pieces'}" if n is not None else "")
+    cell.value = title.upper() + (f"   ·   {n} {'article' if n == 1 else 'articles'}" if n is not None else "")
     cell.font = Font(name="Arial", size=12, bold=True, color="FF2F2F2F")
     cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
     fill = PatternFill("solid", fgColor="FFD9D9D9")
@@ -710,11 +705,11 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     row = r_first
     section = None
     section_rows = {}
-    counts = {t: (n, p) for t, n, p in sections}
+    counts = dict(sections)
     for art in articles:
         if art.get("section") and art["section"] != section:
             section = art["section"]
-            write_section_row(ws, row, section, t_col, *counts[section])
+            write_section_row(ws, row, section, t_col, counts[section])
             section_rows[section] = row
             row += 1
         top, bottom = row, row + 1
