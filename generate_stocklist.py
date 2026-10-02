@@ -93,7 +93,9 @@ def parse_number(text, cfg):
     s = text.strip()
     if s == "":
         return None
-    s = s.replace(cfg["csv"]["thousands"], "").replace(cfg["csv"]["decimal"], ".")
+    s = s.replace(cfg["csv"]["thousands"], "").replace(cfg["csv"]["decimal"], ".").replace("\u2212", "-")
+    if s.endswith("-"):  # nachgestelltes Minus, z.B. '3,00-'
+        s = "-" + s[:-1].strip()
     try:
         return Decimal(s)
     except InvalidOperation:
@@ -153,6 +155,7 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
     known_sizes = set(template_sizes) | set(extra)
 
     errors = []
+    negative = []
     seen_skus = {}
     articles = OrderedDict()
 
@@ -182,9 +185,13 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
         except ValueError as e:
             errors.append(f"Zeile {line} (SKU {sku}): ungültige Zahl '{e}'.")
             continue
-        if stock < 0 or stock != stock.to_integral_value():
+        if stock != stock.to_integral_value():
             errors.append(f"Zeile {line} (SKU {sku}): ungültiger Bestand '{val['stock']}'.")
             continue
+        if stock < 0:
+            # negativer Bestand (z.B. überverkauft) zählt als 0
+            negative.append(f"{sku} ({int(stock)})")
+            stock = Decimal(0)
         if price <= 0 or uvp <= 0:
             errors.append(f"Zeile {line} (SKU {sku}): Preis <= 0.")
             continue
@@ -225,6 +232,8 @@ def build_articles(raw, positions, cfg, template_sizes, warnings):
         art["stock"][size] = int(stock)
         art["skus"].append(sku)
 
+    if negative:
+        warnings.append(f"{len(negative)} Größe(n) mit negativem Bestand auf 0 gesetzt: " + ", ".join(negative))
     if errors:
         shown = errors[:30]
         more = f"\n  ... und {len(errors) - 30} weitere" if len(errors) > 30 else ""

@@ -63,6 +63,7 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 
 - SKU ohne Größe (Taschen, Beanie) → Spalte `One-Size`.
 - Größen `S/M`, `L/XL` werden als zusätzliche Spalten nach `XXL` eingefügt – nur wenn sie vorkommen.
+- Negativer Bestand (z.B. überverkauft) wird als 0 gewertet und als `Hinweis:` aufgelistet – kein Abbruch.
 - Artikel ohne jeglichen Bestand werden weggelassen.
 - Sortierung: Bestseller zuerst (verkaufte Stück in Shopify, letzte 60 Tage), bei Gleichstand höchster Bestand.
   Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
@@ -141,7 +142,7 @@ Bei einem kritischen Problem erstellt das Script **keine** Datei und erklärt, w
 | *Pflichtspalte … fehlt* / *Spalten umbenannt* | Hat sich der CSV-Export geändert? `columns` in `mapping.json` anpassen. |
 | *'UNIT PRICE' kommt 1x statt 2x vor* | Preisspalten im Export geändert – prüfen, welcher Preis gemeint ist. |
 | *unbekannte Größe* | Größe in `sizes.extra_sizes` ergänzen. |
-| *SKU doppelt* / *ungültige Zahl* / *Pflichtfeld leer* / *ungültiger Bestand* | Die genannte CSV-Zeile im Export korrigieren. |
+| *SKU doppelt* / *ungültige Zahl* / *Pflichtfeld leer* / *ungültiger Bestand* (Kommazahl) | Die genannte CSV-Zeile im Export korrigieren. |
 | *abweichende Angabe* | Ein Artikel hat je Größe unterschiedliche Preise/Namen – Export prüfen. |
 
 `Hinweis:`-Zeilen sind keine Fehler (z.B. neue, ignorierte Spalten oder weggelassene ausverkaufte Artikel),
