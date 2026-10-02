@@ -72,6 +72,9 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   danach alle übrigen Artikel nach **Produktgruppen** (T-Shirts & Tops, Longsleeves, Hemden, Hoodies, Zip-Hoodies,
   Strick, Jacken, Hosen, Shorts, Accessoires) mit einer grauen Überschriftszeile je Gruppe. Innerhalb einer Gruppe:
   meistverkauft zuerst, bei Gleichstand höchster Bestand.
+  Die Gruppen-Überschrift zeigt Artikel- und Teilezahl (z.B. `HOODIES · 18 Artikel · 412 Teile`).
+  Über der Kopfzeile steht eine **Inhaltszeile**: Klick auf eine Gruppe springt direkt zu ihr
+  (bleibt beim Scrollen sichtbar; abschalten mit `product_groups.navigation: false`).
   Die Gruppe wird aus dem Artikelnamen erkannt (z.B. `ZIP-HOODIE` → Zip-Hoodies, `KNIT` → Strick).
   Ohne Shopify-Zugang: höchster Gesamtbestand zuerst.
 - Produktbilder aus Shopify in Spalte „Image“ (verkleinert, damit die Datei klein bleibt).

@@ -62,6 +62,8 @@
     "enabled": true,
     "bestseller_top": 10,
     "bestseller_title": "BESTSELLER",
+    "navigation": true,
+    "navigation_label": "INHALT",
     "other_group": "Sonstiges",
     "order": ["T-Shirts & Tops", "Longsleeves", "Hemden", "Hoodies", "Zip-Hoodies", "Strick", "Jacken", "Hosen", "Shorts", "Accessoires"],
     "rules": [

@@ -28,6 +28,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
 from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.hyperlink import Hyperlink
 from openpyxl.utils.units import pixels_to_EMU
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -562,10 +563,68 @@ def apply(cell, info, value=None, keep_template_value=False):
         cell.value = value
 
 
-def write_section_row(ws, row, title, last_col):
-    """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau."""
+def section_summary(articles):
+    """Abschnitte in Listenreihenfolge: [(Titel, Anzahl Artikel, Anzahl Teile), ...]."""
+    out = OrderedDict()
+    for art in articles:
+        if art.get("section"):
+            n, pieces = out.get(art["section"], (0, 0))
+            out[art["section"]] = (n + 1, pieces + sum(art["stock"].values()))
+    return [(t, n, p) for t, (n, p) in out.items()]
+
+
+def fmt_int(n):
+    return f"{n:,}".replace(",", ".")
+
+
+def nav_layout(sections, widths, first_col, last_col):
+    """Verteilt die Sprungmarken auf Zeilen: je Link so viele Spalten, wie der Text braucht.
+    Liefert [[(Titel, Text, Startspalte, Endspalte), ...], ...] (eine Liste je Zeile)."""
+    rows, cur, col = [], [], first_col
+    for title, n, _ in sections:
+        text = f"{title.upper()} ({n})"
+        need, start, have = len(text) * 1.15 + 3, col, 0
+        while have < need and col <= last_col:
+            have += widths[col]
+            col += 1
+        if have < need and cur:  # passt nicht mehr in diese Zeile
+            rows.append(cur)
+            cur, col = [], first_col
+            start, have = col, 0
+            while have < need and col <= last_col:
+                have += widths[col]
+                col += 1
+        cur.append((title, text, start, col - 1))
+    if cur:
+        rows.append(cur)
+    return rows
+
+
+def write_nav_rows(ws, top_row, nav_rows, section_rows, last_col, label):
+    """Inhaltszeile(n) über der Kopfzeile: Klick auf eine Gruppe springt zu ihrer Überschrift."""
+    fill = PatternFill("solid", fgColor="FFF2F2F2")
+    for i, links in enumerate(nav_rows):
+        row = top_row + i
+        ws.row_dimensions[row].height = 20
+        for col in range(1, last_col + 1):
+            ws.cell(row, col).fill = fill
+        if i == 0:
+            c = ws.cell(row, 1, label)
+            c.font = Font(name="Arial", size=10, bold=True, color="FF2F2F2F")
+            c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        for title, text, start, end in links:
+            c = ws.cell(row, start, text)
+            c.hyperlink = Hyperlink(ref=c.coordinate, location=f"'{ws.title}'!A{section_rows[title]}", display=text)
+            c.font = Font(name="Arial", size=10, bold=True, underline="single", color="FF1F4E79")
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            if end > start:
+                ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
+
+
+def write_section_row(ws, row, title, last_col, n=None, pieces=None):
+    """Überschrift einer Produktgruppe: über alle Spalten, fett, helles Grau, mit Artikel- und Teilezahl."""
     cell = ws.cell(row, 1)
-    cell.value = title.upper()
+    cell.value = title.upper() + (f"   ·   {n} Artikel   ·   {fmt_int(pieces)} Teile" if n is not None else "")
     cell.font = Font(name="Arial", size=12, bold=True, color="FF2F2F2F")
     cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
     fill = PatternFill("solid", fgColor="FFD9D9D9")
@@ -583,6 +642,8 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     sizes = final_size_list(layout["sizes"], articles, cfg)
     roles = layout["roles"]
     hr, r_first = xc["header_row"], xc["first_data_row"]
+    gcfg = cfg.get("product_groups", {})
+    sections = section_summary(articles)
 
     n_fixed = len(layout["fixed_order"])
     size_col = {s: n_fixed + 1 + i for i, s in enumerate(sizes)}
@@ -619,6 +680,14 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     ws.column_dimensions[get_column_letter(q_col)].width = roles["quantity"]["width"]
     ws.column_dimensions[get_column_letter(t_col)].width = roles["total"]["width"]
 
+    # Inhaltszeile(n) mit Sprungmarken zwischen Titel und Kopfzeile
+    nav_rows = []
+    if sections and gcfg.get("navigation", True):
+        widths = {c: ws.column_dimensions[get_column_letter(c)].width for c in range(1, t_col + 1)}
+        nav_rows = nav_layout(sections, widths, 2, t_col)
+    nav_top = hr
+    hr, r_first = hr + len(nav_rows), r_first + len(nav_rows)
+
     # Kopfzeile
     ws.row_dimensions[hr].height = layout["row_heights"]["header"]
     for role, col in layout["fixed_cols"].items():
@@ -635,10 +704,13 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
 
     row = r_first
     section = None
+    section_rows = {}
+    counts = {t: (n, p) for t, n, p in sections}
     for art in articles:
         if art.get("section") and art["section"] != section:
             section = art["section"]
-            write_section_row(ws, row, section, t_col)
+            write_section_row(ws, row, section, t_col, *counts[section])
+            section_rows[section] = row
             row += 1
         top, bottom = row, row + 1
         ws.row_dimensions[top].height = layout["row_heights"]["top"]
@@ -676,6 +748,8 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         row += 2
 
     last_row = row - 1
+    if nav_rows:
+        write_nav_rows(ws, nav_top, nav_rows, section_rows, t_col, gcfg.get("navigation_label", "INHALT"))
     if cfg["rules"]["grand_total_row"] and cfg["rules"]["order_formulas"]:
         ws.row_dimensions[row].height = layout["row_heights"]["bottom"]
         apply(ws.cell(row, q_col - 1), roles["quantity"]["bottom"], xc["grand_total_label"])
