@@ -170,6 +170,8 @@ def apply_brand_groups(cfg, brand):
     """Produktgruppen je Marke: zusätzliche Stichwörter (nach den allgemeinen geprüft) und eigene Reihenfolge."""
     bg = brand_config(cfg, brand).get("product_groups", {})
     gcfg = cfg.setdefault("product_groups", {})
+    gcfg["_brand"] = brand
+    gcfg["learned"] = load_learned_groups(brand)
     if bg.get("rules"):
         gcfg["rules"] = list(gcfg.get("rules", [])) + list(bg["rules"])
     if bg.get("order"):
@@ -509,9 +511,38 @@ def resolve_price_conflicts(articles, cfg, warnings):
             )
 
 
+OVERRIDES_FILE = BASE_DIR / "config" / "category_overrides.json"
+
+
+def load_learned_groups(brand):
+    """Im Fenster zugeordnete Kategorien (config/category_overrides.json): {Marke: {Modellname: Gruppe}}."""
+    try:
+        data = json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    for name, groups in data.items():
+        if normalize_name(name) == normalize_name(brand or "") and isinstance(groups, dict):
+            return {normalize_name(k): v for k, v in groups.items()}
+    return {}
+
+
+def save_learned_groups(brand, new):
+    """Neue Zuordnungen {Modellname: Gruppe} dauerhaft speichern (bestehende bleiben erhalten)."""
+    try:
+        data = json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    key = next((k for k in data if normalize_name(k) == normalize_name(brand or "")), brand or "Alle")
+    data.setdefault(key, {}).update(new)
+    OVERRIDES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def product_group(name, gcfg, sku=None):
-    """Produktgruppe: zuerst SKU-Anfang (sku_prefixes, z.B. '40' = Schuhe), dann Stichwort im Artikelnamen
-    (ohne Farbe); jeweils gewinnt die erste passende Regel."""
+    """Produktgruppe: zuerst eigene Zuordnung aus dem Fenster (category_overrides.json), dann SKU-Anfang
+    (sku_prefixes, z.B. '40' = Schuhe), dann Stichwort im Artikelnamen (ohne Farbe); erste passende Regel gewinnt."""
+    learned = gcfg.get("learned", {}).get(normalize_name(model_name(name)))
+    if learned:
+        return learned
     for prefix, group in gcfg.get("sku_prefixes", []):
         if sku and str(sku).upper().startswith(str(prefix).upper()):
             return group
@@ -556,13 +587,46 @@ def sort_articles(articles, cfg, warnings):
     rest.sort(key=lambda a: order.index(a["section"]))  # stabil: innerhalb der Gruppe bleibt die Sortierung oben
 
     other = [a for a in rest if a["section"] == gcfg["other_group"]]
+    if other and gcfg.get("ask_unknown", True) and sys.stdin.isatty():
+        ask_unknown_groups(other, gcfg)
+        for art in other:
+            art["section"] = product_group(art["name"], gcfg, art["sku"])
+            if art["section"] not in order:
+                order.append(art["section"])
+        rest.sort(key=lambda a: order.index(a["section"]))
+        other = [a for a in rest if a["section"] == gcfg["other_group"]]
     if other:
         warnings.append(
             f"{len(other)} Artikel keiner Produktgruppe zugeordnet ('{gcfg['other_group']}'): "
             + ", ".join(f"{a['sku']} ({a['name']})" for a in other)
-            + " – ggf. Stichwort in mapping.json unter product_groups.rules ergänzen."
+            + " – beim nächsten Start im Fenster zuordnen oder Stichwort in mapping.json ergänzen."
         )
     articles[:] = top + rest
+
+
+def ask_unknown_groups(other, gcfg):
+    """Fragt für Artikel ohne Kategorie nach der Gruppe und speichert die Antwort dauerhaft (je Modellname,
+    gilt damit auch für andere Farben desselben Modells)."""
+    groups = [g for g in gcfg["order"] if g != gcfg["other_group"]]
+    models = OrderedDict()
+    for art in other:
+        models.setdefault(model_name(art["name"]), art)
+    print(f"{len(models)} Artikel ohne Kategorie – bitte zuordnen (wird für die Zukunft gespeichert):")
+    print("    " + "  ".join(f"{i} {g}" for i, g in enumerate(groups, 1)) + f"  0 = {gcfg['other_group']} lassen")
+    new = {}
+    for model, art in models.items():
+        while True:
+            answer = input(f"  {art['sku']}  {model}: ").strip()
+            if answer.isdigit() and 0 <= int(answer) <= len(groups):
+                break
+            print(f"    Bitte eine Zahl von 0 bis {len(groups)} eingeben.")
+        if int(answer) > 0:
+            new[model] = groups[int(answer) - 1]
+    print()
+    if new:
+        save_learned_groups(gcfg.get("_brand"), new)
+        gcfg.setdefault("learned", {}).update({normalize_name(k): v for k, v in new.items()})
+        print(f"Gespeichert in config/{OVERRIDES_FILE.name}: " + ", ".join(f"{k} → {v}" for k, v in new.items()) + "\n")
 
 
 def load_shops(cfg):
@@ -600,6 +664,7 @@ def select_shop(shops, wanted):
 
 SORT_CHOICES = [
     ("bestseller", "Bestseller & Kategorien"),
+    ("categories", "Nur Kategorien (je Kategorie: meistverkauft zuerst, dann höchster Bestand)"),
     ("stock", "Nach Bestand (höchster Bestand zuerst, ohne Kategorien)"),
 ]
 
@@ -622,11 +687,16 @@ def select_sort(wanted, cfg):
             print(f"Bitte eine Zahl von 1 bis {len(keys)} eingeben.")
     else:
         choice = "bestseller" if cfg["rules"]["sort"] == "bestseller" else "stock"
+    gcfg = cfg.setdefault("product_groups", {})
     if choice == "stock":
         cfg["rules"]["sort"] = "stock_desc"
-        cfg.setdefault("product_groups", {})["enabled"] = False
+        gcfg["enabled"] = False
     else:
+        # Verkaufszahlen + Bestand sortieren auch innerhalb der Kategorien; 'categories' ohne Bestseller-Block oben
         cfg["rules"]["sort"] = "bestseller"
+        gcfg["enabled"] = True
+        if choice == "categories":
+            gcfg["bestseller_top"] = 0
     return dict(SORT_CHOICES)[choice]
 
 
@@ -1263,7 +1333,8 @@ def main():
     parser.add_argument("--shop", help="Marke/Shop aus config/shopify.env (bei mehreren Shops)")
     parser.add_argument("--markup", help="EK-Preis = UVP ÷ Markup, wenn die CSV keinen EK-Preis hat (z.B. 2,5)")
     parser.add_argument("--sort", choices=[k for k, _ in SORT_CHOICES],
-                        help="bestseller = Bestseller & Kategorien, stock = nach Bestand (sonst Abfrage)")
+                        help="bestseller = Bestseller & Kategorien, categories = nur Kategorien, "
+                             "stock = nach Bestand (sonst Abfrage)")
     args = parser.parse_args()
 
     cfg = load_config()

@@ -131,6 +131,8 @@
     "navigation": true,
     "navigation_label": "CONTENTS",
     "other_group": "Other",
+    "ask_unknown": true,
+    "_ask_unknown_note": "true = Artikel ohne Kategorie werden beim Start im Fenster abgefragt; die Antwort landet in config/category_overrides.json (je Marke und Modellname) und gilt ab dann immer.",
     "order": ["Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Shoes", "Accessories"],
     "rules": [
       ["KNIT", "Knitwear"], ["SWEATER", "Knitwear"], ["JERSEY", "Knitwear"], ["POLO", "Knitwear"], ["CARDIGAN", "Knitwear"],
