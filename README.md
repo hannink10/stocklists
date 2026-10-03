@@ -55,6 +55,8 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   Die SKU `1032212-XS` wird in Artikelnummer `1032212` und Größe `XS` zerlegt, der Name ohne Größe übernommen.
   Marken mit anderem SKU-Aufbau bekommen in `mapping.json` → `brands` → `sku_rule` eigene Muster. **Flowers**:
   `FFS10141` → `FFS101` Größe `41` (letzte zwei Ziffern), `FFSAPP161-S` → Größe `S`, `FFSSS27_08_1XL` → Größe `XL`;
+  Ältere Schuhe mit US-Größe werden in EU umgerechnet (`FFS005W85` = Damen US 8,5 → EU 40, `FFS005M10` → EU 44,
+  Tabelle wie im Flowers-Shopify); ergeben Damen- und Herren-SKU dieselbe EU-Größe, wird der Bestand addiert.
   alles andere (z.B. `FFSACC045`) ist One-Size und wird als `Hinweis:` aufgelistet.
 - **Spalten werden automatisch erkannt** – über ihren Namen, egal in welcher Reihenfolge, Groß-/Kleinschreibung
   oder mit Satzzeichen. Jede Marke darf ihre CSV also anders aufbauen. Bei jedem Lauf zeigt `Spalten:` an,
