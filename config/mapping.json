@@ -23,7 +23,13 @@
     "Reternity": {
       "product_groups": {
         "_note": "sku_prefixes: SKU-Anfang -> Kategorie, wird vor den Stichwörtern im Namen geprüft.",
-        "sku_prefixes": [["40", "Shoes"]]
+        "sku_prefixes": [["40", "Shoes"]],
+        "order": ["Suits", "Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Shoes", "Accessories"],
+        "priority_rules": [["BLAZER", "Suits"], ["TAILORED BAGGY PANTS", "Suits"]],
+        "sets": {
+          "Suits": {"label": "SUIT SET", "parts": ["BLAZER", "TAILORED BAGGY PANTS"],
+                    "_note": "Blazer und Hose gleicher Farbe (Text nach dem letzten ' - ') stehen als Set untereinander"}
+        }
       }
     },
     "Flowers": {
