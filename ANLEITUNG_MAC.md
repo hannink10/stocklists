@@ -1,5 +1,38 @@
 # Stockliste erstellen – Anleitung für den Mac
 
+## Gemeinsam arbeiten (Johan + Mitarbeiter)
+
+Der Stocklist-Ordner liegt in einem **geteilten Cloud-Ordner** (z.B. OneDrive, iCloud Drive oder Dropbox).
+Alle arbeiten im **selben Ordner** – dadurch haben alle immer denselben Stand:
+
+- **Kategorien**, die jemand im Terminal zuordnet (`config/category_overrides.json`), gelten sofort für alle.
+- **Neue Programmversionen** muss nur eine Person einspielen.
+- Zugangsdaten (`config/shopify.env`), Einstellungen und fertige Listen (`output`) sind für alle da.
+
+Die Python-Umgebung liegt dagegen auf jedem Mac lokal (`~/Library/Application Support/Stockliste`) und wird
+nicht geteilt – darum muss sich niemand kümmern.
+
+**Spielregeln:**
+
+- Nicht gleichzeitig Listen erstellen: in `input` darf immer nur **eine** CSV liegen.
+- Updates (neue `generate_stocklist.py` / `config/mapping.json`) spielt nur eine Person ein – kurz absprechen.
+- `config/category_overrides.json` nicht löschen – da steckt das gelernte Wissen über Kategorien drin.
+
+### Ordner teilen (einmalig, Johan)
+
+1. Den bisherigen Ordner `stocklists-main` in den Cloud-Ordner verschieben, z.B. nach `OneDrive/Stockliste`.
+   Einen Unterordner **`.venv`** darin vorher löschen (wird nicht mehr gebraucht).
+2. Den Ordner im Cloud-Dienst mit dem Mitarbeiter **teilen, mit Bearbeitungsrechten**.
+3. Rechtsklick auf den Ordner → **„Immer auf diesem Gerät behalten“** (OneDrive) bzw. **„Laden“** (iCloud),
+   damit alle Dateien offline vorliegen.
+
+### Auf dem Mac des Mitarbeiters (einmalig)
+
+1. Die Freigabe annehmen und den Ordner im Finder verfügbar machen (OneDrive: **„Zu meinen Dateien
+   hinzufügen“**), dann ebenfalls **„Immer auf diesem Gerät behalten“**.
+2. Python installieren (siehe unten, Schritt 1) und den ersten Start freigeben (Schritt 4).
+   Schritte 2 und 3 entfallen – Projekt und Zugangsdaten sind schon im geteilten Ordner.
+
 ## Einmalig einrichten (ca. 10 Minuten)
 
 1. **Python installieren**
@@ -28,8 +61,11 @@
 1. Die neue CSV aus dem Warenwirtschaftssystem in den Ordner **`input`** legen.
    Dort darf nur **diese eine** CSV liegen.
 2. **Doppelklick auf `Stockliste erstellen.command`.**
-   Ein Terminal-Fenster öffnet sich. Sind mehrere Marken eingerichtet, fragt es zuerst, für welche Marke die
-   Liste erstellt wird: Nummer eintippen und Enter drücken. Danach zeigt es den Fortschritt.
+   Ein Terminal-Fenster öffnet sich und fragt nacheinander (jeweils Nummer eintippen, Enter):
+   - **Marke**
+   - **Sortierung**: 1 = Bestseller & Kategorien, 2 = nur Kategorien, 3 = nach Bestand
+   - **Markup**, falls die CSV keinen EK-Preis hat (z.B. `2,5`)
+   - **Kategorie** für Artikel, die das Programm nicht zuordnen kann – die Antwort wird für alle gespeichert.
 3. Am Ende steht **„Fertig: output/Stocklist_…xlsx“**, und der Finder zeigt die fertige Datei an.
    Diese Datei an den Kunden schicken.
 4. Terminal-Fenster schließen.
@@ -50,6 +86,7 @@ wieder in `input` legen.
 
 ## Neue Version des Programms
 
-Wenn Johan Bescheid gibt, dass es eine neue Version gibt: wie in Schritt 2 neu herunterladen und
-`config/shopify.env` aus dem alten Ordner in den neuen kopieren. Der erste Start des neuen Ordners dauert dann
-wieder 1–2 Minuten.
+Nur **eine Person** spielt Updates ein: die geänderten Dateien (meist `generate_stocklist.py` und
+`config/mapping.json`) auf GitHub öffnen, über **Download raw file** herunterladen und im geteilten Ordner
+ersetzen. Alle anderen haben die neue Version automatisch. `config/shopify.env` und
+`config/category_overrides.json` dabei **nicht** ersetzen oder löschen.
