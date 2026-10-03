@@ -36,7 +36,10 @@ pip install -r requirements.txt
    python generate_stocklist.py
    ```
    Erst die Marke wählen, dann die Sortierung:
-   `1` = Bestseller & Kategorien, `2` = nach Bestand (höchster Bestand zuerst, ohne Kategorien).
+   `1` = Bestseller & Kategorien, `2` = nur Kategorien (je Kategorie meistverkauft zuerst, dann höchster Bestand),
+   `3` = nach Bestand (höchster Bestand zuerst, ohne Kategorien).
+   Findet das Script für einen Artikel keine Kategorie, fragt es nach und **merkt sich die Antwort**
+   (`config/category_overrides.json`, je Marke und Modellname – gilt auch für andere Farben desselben Modells).
 3. Fertige Datei aus `output/` nehmen und an Kunden senden.
 
 Nach erfolgreichem Lauf wird die CSV nach `input/archiv/` verschoben, damit beim nächsten Mal keine alte Datei
@@ -45,7 +48,7 @@ versehentlich verwendet wird. Liegen mehrere CSVs in `input/`, bricht das Script
 Optionen:
 - `python generate_stocklist.py --csv pfad/zur/datei.csv` – bestimmte CSV verwenden (wird nicht archiviert)
 - `python generate_stocklist.py --no-archive` – CSV nach dem Lauf in `input/` lassen
-- `--shop Reternity` / `--sort bestseller` bzw. `--sort stock` / `--markup 2,5` – Marke, Sortierung bzw. Markup ohne Abfrage festlegen
+- `--shop Reternity` / `--sort bestseller|categories|stock` / `--markup 2,5` – Marke, Sortierung bzw. Markup ohne Abfrage festlegen
 
 Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3`, … angehängt.
 
@@ -134,7 +137,9 @@ Alles steht in `config/mapping.json`:
   - je Marke unter `brands` → `<Marke>` → `product_groups`: `sku_prefixes` (SKU-Anfang → Gruppe, vor den Stichwörtern;
     **Reternity**: SKU beginnt mit `40` = Shoes), zusätzliche `rules` (z.B. Flowers-Schuhmodelle `SEED`, `OFFSHOOT`, …)
     und eine eigene `order`.
-    Artikel ohne passendes Stichwort landen unter `Other` und werden als `Hinweis:` gemeldet.
+    Artikel ohne passendes Stichwort werden beim Start abgefragt (`ask_unknown`); die Antwort steht danach in
+    `config/category_overrides.json` und hat Vorrang vor allen Regeln. Dort kann man sie auch ändern oder löschen.
+    Ohne Abfragefenster landen sie unter `Other` und werden als `Hinweis:` gemeldet.
   - `order_formulas`, `grand_total_row` – Formeln in der Bestellzeile / Gesamtsumme
   - `remove_unused_sizes` – nur Größenspalten, für die mindestens ein Artikel Bestand hat (Standard: an)
   - `landscape_print` – A4-Querformat, schmale Ränder, auf Seitenbreite skaliert, Kopfzeilen auf jeder Seite
