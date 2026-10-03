@@ -45,7 +45,7 @@ versehentlich verwendet wird. Liegen mehrere CSVs in `input/`, bricht das Script
 Optionen:
 - `python generate_stocklist.py --csv pfad/zur/datei.csv` – bestimmte CSV verwenden (wird nicht archiviert)
 - `python generate_stocklist.py --no-archive` – CSV nach dem Lauf in `input/` lassen
-- `--shop Reternity` / `--sort bestseller` bzw. `--sort stock` – Marke bzw. Sortierung ohne Abfrage festlegen
+- `--shop Reternity` / `--sort bestseller` bzw. `--sort stock` / `--markup 2,5` – Marke, Sortierung bzw. Markup ohne Abfrage festlegen
 
 Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3`, … angehängt.
 
@@ -67,6 +67,13 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   | Händlerpreis | `UNIT PRICE`, `Händlerpreis`, `EK`, `EK netto`, `Wholesale Price` | UNIT PRICE |
   | UVP | `UVP`, `RRP`, `VK`, `VK brutto`, `Retail Price` | RRP |
   | Bestand | `AVAILABLE`, `Bestand`, `Lager`, `Verfügbar`, `Stock`, `Qty` | graue Bestandszeile |
+
+  Pflicht sind nur **SKU, Name, UVP und Bestand**:
+  - **Kein EK-Preis in der CSV:** Das Script fragt nach dem **Markup** und rechnet EK = UVP ÷ Markup
+    (z.B. 109,90 € ÷ 2,5 = 43,96 €). Ohne Abfragefenster: `--markup 2,5`.
+  - **Spalte `Discount`** (auch `Rabatt`, `Nachlass`, …; Werte wie `30`, `30%` oder `0,3`): In der Liste stehen dann
+    zusätzlich **DISCOUNT** und **DISCOUNT PRICE** (= EK − Discount); `TOTAL` rechnet mit dem Discount-Preis.
+  - Alle Preise werden kaufmännisch auf zwei Nachkommastellen gerundet.
 
   Alle anderen Spalten werden ignoriert. Kommt ein Name doppelt vor (z.B. zweimal `UNIT PRICE`) und die Werte
   unterscheiden sich, entscheidet `occurrence`. Außerdem automatisch: Trennzeichen (`;` `,` Tab), Zahlenformat

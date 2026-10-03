@@ -13,7 +13,8 @@
     "sku":        {"header": "SKU", "aliases": ["Artikelnummer", "Art.-Nr.", "Art Nr", "ArtNr", "Artikelnr", "Item Number", "Item No", "Article Number", "Article No", "Product Code", "Style Number", "Variant SKU"]},
     "name":       {"header": "NAME", "aliases": ["Artikelname", "Bezeichnung", "Artikelbezeichnung", "Produktname", "Product Name", "Item Name", "Description", "Beschreibung", "Title", "Titel"]},
     "uvp":        {"header": "UVP", "aliases": ["RRP", "Retail Price", "Retail", "MSRP", "VK", "VK-Preis", "Verkaufspreis", "VK brutto", "Endkundenpreis", "Preis brutto"]},
-    "unit_price": {"header": "UNIT PRICE", "occurrence": 2, "aliases": ["Händlerpreis", "Haendlerpreis", "EK", "EK-Preis", "EK netto", "Einkaufspreis", "Wholesale", "Wholesale Price", "WHS", "B2B Price", "B2B-Preis", "Net Price", "Nettopreis", "Price"]},
+    "unit_price": {"header": "UNIT PRICE", "occurrence": 2, "required": false, "_note": "fehlt die Spalte, wird nach dem Markup gefragt (EK = UVP ÷ Markup)", "aliases": ["Händlerpreis", "Haendlerpreis", "EK", "EK-Preis", "EK netto", "Einkaufspreis", "Wholesale", "Wholesale Price", "WHS", "B2B Price", "B2B-Preis", "Net Price", "Nettopreis", "Price"]},
+    "discount":   {"header": "DISCOUNT", "required": false, "_note": "optional; wenn vorhanden: Spalten DISCOUNT und DISCOUNT PRICE in der Liste", "aliases": ["Discount %", "Discount in %", "Rabatt", "Rabatt %", "Rabatt in %", "Nachlass", "Nachlass %", "Reduction", "Sale %"]},
     "stock":      {"header": "AVAILABLE", "aliases": ["Bestand", "Lager", "Verfügbar", "Verfügbarer Bestand", "Lagerbestand", "Stock", "Available Stock", "Qty", "Quantity", "Menge", "Inventory", "On Hand"]}
   },
 
@@ -63,7 +64,7 @@
     "sheet_name": "Stocklist {brand} {date}",
     "grand_total_label": "TOTAL",
     "_labels_note": "Texte in der Liste, die von der Vorlage abweichen sollen (Englisch). Leer lassen = Text aus der Vorlage.",
-    "header_labels": {"uvp": "RRP"},
+    "header_labels": {"uvp": "RRP", "discount": "DISCOUNT", "discount_price": "DISCOUNT PRICE"},
     "stock_row_labels": {"quantity": "Stock", "total": "per size"},
     "order_hints": {
       "_note": "Legende oben + Hinweis beim Klick in die orange Bestellzeile. limit_to_stock: mehr als der Bestand wird abgelehnt.",
