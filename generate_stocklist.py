@@ -178,21 +178,28 @@ def apply_brand_groups(cfg, brand):
 
 
 def split_sku(sku, rule, known_sizes):
-    """SKU -> (Artikelnummer, Größe). Größe None = Artikel ohne Größe (One-Size).
+    """SKU -> (Artikelnummer, Größe, umgerechnet). Größe None = Artikel ohne Größe (One-Size).
     rule 'separator': Größe nach dem letzten Trennzeichen ('1032212-XS' -> '1032212', 'XS').
-    rule 'patterns':  Liste regulärer Ausdrücke mit den Gruppen 'base' und 'size'; der erste, der passt
-                      und eine bekannte Größe liefert, gewinnt ('FFS10141' -> 'FFS101', '41')."""
+    rule 'patterns':  Liste regulärer Ausdrücke mit den Gruppen 'base' und 'size' – als Text oder als
+                      {"pattern": ..., "size_map": {...}} mit Umrechnung (z.B. US 'W85' -> EU '40');
+                      das erste Muster, das passt und eine bekannte Größe liefert, gewinnt."""
     if rule.get("mode") == "patterns":
-        for pattern in rule["patterns"]:
+        for entry in rule["patterns"]:
+            pattern, size_map = (entry, None) if isinstance(entry, str) else (entry["pattern"], entry.get("size_map"))
             m = re.fullmatch(pattern, sku)
-            if m and m.group("size") in known_sizes:
-                return m.group("base"), m.group("size")
-        return sku, None
+            if not m:
+                continue
+            size = m.group("size")
+            if size_map is not None:
+                size = size_map.get(size)
+            if size in known_sizes:
+                return m.group("base"), size, size_map is not None
+        return sku, None, False
     sep = rule.get("separator", "-")
     if sep in sku:
         base, size = sku.rsplit(sep, 1)
-        return base, size
-    return sku, None
+        return base, size, False
+    return sku, None, False
 
 
 def norm_header(text):
@@ -290,6 +297,7 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
     errors = []
     negative = []
     no_size_skus = []       # SKU ohne erkennbare Größe (Suffix-Regel) -> One-Size
+    merged = []             # umgerechnete Größen, die doppelt vorkommen (Bestand addiert)
     name_without_size = []  # Name endet nicht auf die Größe -> Name unverändert übernommen
     seen_skus = {}
     articles = OrderedDict()
@@ -336,7 +344,7 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
             warnings.append(f"Zeile {line} (SKU {sku}): UNIT PRICE {price} ist höher als UVP {uvp}.")
 
         # Artikelnummer und Größe trennen (Regel je Marke, siehe mapping.json → brands → sku_rule)
-        base, size = split_sku(sku, rule, known_sizes)
+        base, size, converted = split_sku(sku, rule, known_sizes)
         if size is None:
             size, name = no_size, val["name"]
             if rule.get("mode") == "patterns":
@@ -367,6 +375,12 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
         art["prices"]["unit_price"].append((price, size))
         art["prices"]["uvp"].append((uvp, size))
         art["prices"]["discount"].append((discount or Decimal(0), size))
+        if size in art["stock"] and converted:
+            # z.B. US Damen 8,5 und US Herren 7 = beide EU 40: Bestand zusammenzählen
+            merged.append(f"{base} {size}")
+            art["stock"][size] += int(stock)
+            art["skus"].append(sku)
+            continue
         if size in art["stock"]:
             errors.append(f"Zeile {line}: Artikel {base} hat Größe '{size}' mehrfach.")
         art["stock"][size] = int(stock)
@@ -379,6 +393,9 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
         warnings.append(f"{len(no_size_skus)} SKU(s) ohne erkennbare Größe – als One-Size übernommen "
                         "(falls falsch: Muster in mapping.json → brands → sku_rule ergänzen): "
                         + ", ".join(no_size_skus[:15]) + (" …" if len(no_size_skus) > 15 else ""))
+    if merged:
+        warnings.append(f"{len(merged)} umgerechnete Größe(n) kamen doppelt vor (z.B. US Damen + Herren = gleiche EU-Größe) "
+                        "– Bestand zusammengezählt: " + ", ".join(merged[:10]) + (" …" if len(merged) > 10 else ""))
     if name_without_size:
         warnings.append(f"{len(name_without_size)} Zeile(n): Name endet nicht auf die Größe (Name unverändert übernommen), z.B. "
                         + ", ".join(name_without_size[:5]))
@@ -761,9 +778,22 @@ def final_size_list(template_sizes, articles, cfg):
     für die mindestens ein Artikel Bestand hat (weniger Spalten, übersichtlicher)."""
     used = {s for a in articles for s in a["stock"]}
     sizes = list(template_sizes)
+    def number(s):
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
     for extra in cfg["sizes"]["extra_sizes"]:
         if extra["size"] in used and extra["size"] not in sizes:
-            sizes.insert(sizes.index(extra["insert_after"]) + 1, extra["size"])
+            if extra["insert_after"] in sizes:
+                pos = sizes.index(extra["insert_after"]) + 1
+            else:
+                # Bezugsgröße fehlt (z.B. 37.5 ohne 37): numerisch einsortieren, sonst vor One-Size
+                n = number(extra["size"])
+                pos = next((i for i, s in enumerate(sizes) if n is not None and number(s) is not None and number(s) > n),
+                           sizes.index(cfg["sizes"]["no_size_column"]) if cfg["sizes"]["no_size_column"] in sizes else len(sizes))
+            sizes.insert(pos, extra["size"])
     if cfg["rules"].get("remove_unused_sizes"):
         in_stock = {s for a in articles for s, q in a["stock"].items() if q > 0}
         sizes = [s for s in sizes if s in in_stock] or sizes[:1]
