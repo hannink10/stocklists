@@ -18,7 +18,30 @@
   },
 
   "brands": {
-    "_note": "Nur falls eine Marke ganz eigene Spaltennamen hat, z.B.: \"Flowers\": {\"columns\": {\"unit_price\": {\"header\": \"EK Händler\"}}}"
+    "_note": "Einstellungen je Marke (Name wie in config/shopify.env). columns: eigene Spaltennamen, z.B. {\"unit_price\": {\"header\": \"EK Händler\"}}. sku_rule: wie die Größe in der SKU steht – Standard ist Trennzeichen '-' (1032212-XS), 'patterns' = Liste von Mustern (reguläre Ausdrücke mit base und size).",
+    "Reternity": {
+      "product_groups": {
+        "_note": "sku_prefixes: SKU-Anfang -> Kategorie, wird vor den Stichwörtern im Namen geprüft.",
+        "sku_prefixes": [["40", "Shoes"]]
+      }
+    },
+    "Flowers": {
+      "product_groups": {
+        "_note": "Schuhmodelle von Flowers heißen nicht 'Sneaker' – zusätzliche Stichwörter, geprüft nach den allgemeinen.",
+        "order": ["Shoes", "Shirts", "Hoodies", "Knitwear", "Jackets", "Pants", "Accessories"],
+        "rules": [["SEED", "Shoes"], ["OFFSHOOT", "Shoes"], ["SENSE", "Shoes"], ["BLEND", "Shoes"], ["RADICLE", "Shoes"],
+                  ["AENERGY", "Shoes"], ["BLANC CANVAS", "Shoes"], ["THE OG", "Shoes"], ["HUGO", "Shoes"]]
+      },
+      "sku_rule": {
+        "_note": "Der Reihe nach geprüft, das erste passende Muster mit bekannter Größe gewinnt. Sonst One-Size (mit Hinweis).",
+        "mode": "patterns",
+        "patterns": [
+          "(?P<base>FFS\\d{3})(?P<size>\\d{2})",
+          "(?P<base>.+)-(?P<size>[^-]+)",
+          "(?P<base>.+_\\d)(?P<size>XXL|XL|L|M|S|XS)"
+        ]
+      }
+    }
   },
 
   "excel": {
@@ -72,7 +95,9 @@
     "no_size_column": "One-Size",
     "extra_sizes": [
       {"size": "S/M",  "insert_after": "XXL"},
-      {"size": "L/XL", "insert_after": "S/M"}
+      {"size": "L/XL", "insert_after": "S/M"},
+      {"size": "35",   "insert_after": "34"},
+      {"size": "37",   "insert_after": "36"}
     ]
   },
 
@@ -94,17 +119,21 @@
     "navigation": true,
     "navigation_label": "CONTENTS",
     "other_group": "Other",
-    "order": ["Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Accessories"],
+    "order": ["Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Shoes", "Accessories"],
     "rules": [
       ["KNIT", "Knitwear"], ["SWEATER", "Knitwear"], ["JERSEY", "Knitwear"], ["POLO", "Knitwear"], ["CARDIGAN", "Knitwear"],
+      ["BOXERSHORTS", "Accessories"], ["BOXER", "Accessories"], ["SOCKS", "Accessories"], ["FRAGRANCE", "Accessories"],
       ["SHORTS", "Pants"], ["JORTS", "Pants"],
       ["ZIP SHIRT", "Shirts"], ["OVERSHIRT", "Shirts"],
       ["HOODIE", "Hoodies"], ["HALF ZIP", "Hoodies"], ["ZIP JACKET", "Hoodies"], ["SWEATSHIRT", "Hoodies"], ["CREWNECK", "Hoodies"],
       ["JACKET", "Jackets"], ["PUFFER", "Jackets"], ["VEST", "Jackets"], ["BOMBER", "Jackets"], ["COAT", "Jackets"],
-      ["SHIRT", "Shirts"], ["LONGSLEEVE", "Shirts"], ["TEE", "Shirts"], ["TANK TOP", "Shirts"], ["TOP", "Shirts"], ["FLANNEL", "Shirts"],
+      ["SHIRT", "Shirts"], ["TSHIRT", "Shirts"], ["LONGSLEEVE", "Shirts"], ["TEE", "Shirts"], ["TANK TOP", "Shirts"], ["TOP", "Shirts"], ["FLANNEL", "Shirts"],
       ["PANTS", "Pants"], ["SWEATPANTS", "Pants"], ["JOGGER", "Pants"], ["DENIM", "Pants"], ["JEANS", "Pants"], ["CARGO", "Pants"], ["TROUSERS", "Pants"],
+      ["SNEAKER", "Shoes"], ["SNEAKERS", "Shoes"], ["SHOE", "Shoes"], ["SHOES", "Shoes"], ["BOOT", "Shoes"], ["BOOTS", "Shoes"],
+      ["LOAFER", "Shoes"], ["SLIDES", "Shoes"], ["SANDAL", "Shoes"], ["SANDALS", "Shoes"], ["MULE", "Shoes"], ["CLOG", "Shoes"],
       ["BEANIE", "Accessories"], ["CAP", "Accessories"], ["HAT", "Accessories"], ["BAG", "Accessories"], ["BELT", "Accessories"],
-      ["SOCKS", "Accessories"], ["SCARF", "Accessories"], ["WALLET", "Accessories"]
+      ["SOCKS", "Accessories"], ["SCARF", "Accessories"], ["WALLET", "Accessories"],
+      ["BACKPACK", "Accessories"], ["POUCH", "Accessories"], ["PINS", "Accessories"], ["KNIFE", "Accessories"]
     ]
   },
 

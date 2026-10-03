@@ -35,6 +35,8 @@ pip install -r requirements.txt
    ```
    python generate_stocklist.py
    ```
+   Erst die Marke wählen, dann die Sortierung:
+   `1` = Bestseller & Kategorien, `2` = nach Bestand (höchster Bestand zuerst, ohne Kategorien).
 3. Fertige Datei aus `output/` nehmen und an Kunden senden.
 
 Nach erfolgreichem Lauf wird die CSV nach `input/archiv/` verschoben, damit beim nächsten Mal keine alte Datei
@@ -43,6 +45,7 @@ versehentlich verwendet wird. Liegen mehrere CSVs in `input/`, bricht das Script
 Optionen:
 - `python generate_stocklist.py --csv pfad/zur/datei.csv` – bestimmte CSV verwenden (wird nicht archiviert)
 - `python generate_stocklist.py --no-archive` – CSV nach dem Lauf in `input/` lassen
+- `--shop Reternity` / `--sort bestseller` bzw. `--sort stock` – Marke bzw. Sortierung ohne Abfrage festlegen
 
 Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3`, … angehängt.
 
@@ -50,6 +53,9 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
 
 - Die CSV hat **eine Zeile pro Artikel und Größe**; die Excel-Liste **einen Zwei-Zeilen-Block pro Artikel**.
   Die SKU `1032212-XS` wird in Artikelnummer `1032212` und Größe `XS` zerlegt, der Name ohne Größe übernommen.
+  Marken mit anderem SKU-Aufbau bekommen in `mapping.json` → `brands` → `sku_rule` eigene Muster. **Flowers**:
+  `FFS10141` → `FFS101` Größe `41` (letzte zwei Ziffern), `FFSAPP161-S` → Größe `S`, `FFSSS27_08_1XL` → Größe `XL`;
+  alles andere (z.B. `FFSACC045`) ist One-Size und wird als `Hinweis:` aufgelistet.
 - **Spalten werden automatisch erkannt** – über ihren Namen, egal in welcher Reihenfolge, Groß-/Kleinschreibung
   oder mit Satzzeichen. Jede Marke darf ihre CSV also anders aufbauen. Bei jedem Lauf zeigt `Spalten:` an,
   welche Spalte wofür verwendet wurde. Beispiele für erkannte Namen:
@@ -116,6 +122,9 @@ Alles steht in `config/mapping.json`:
   - `enabled` – Gruppen ein/aus; `bestseller_top` – Anzahl im Bestseller-Abschnitt (`0` = kein Abschnitt)
   - `order` – Reihenfolge der Gruppen in der Liste
   - `rules` – Stichwort → Gruppe; die **erste** passende Regel von oben gewinnt (daher steht `ZIP HOODIE` vor `HOODIE`).
+  - je Marke unter `brands` → `<Marke>` → `product_groups`: `sku_prefixes` (SKU-Anfang → Gruppe, vor den Stichwörtern;
+    **Reternity**: SKU beginnt mit `40` = Shoes), zusätzliche `rules` (z.B. Flowers-Schuhmodelle `SEED`, `OFFSHOOT`, …)
+    und eine eigene `order`.
     Artikel ohne passendes Stichwort landen unter `Other` und werden als `Hinweis:` gemeldet.
   - `order_formulas`, `grand_total_row` – Formeln in der Bestellzeile / Gesamtsumme
   - `hide_unused_sizes` – Größenspalten ohne Artikel ausblenden (größere Schrift im Druck)
