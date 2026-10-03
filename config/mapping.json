@@ -64,6 +64,7 @@
     "sheet_name": "Stocklist {brand} {date}",
     "grand_total_label": "TOTAL",
     "_labels_note": "Texte in der Liste, die von der Vorlage abweichen sollen (Englisch). Leer lassen = Text aus der Vorlage.",
+    "price_order": ["uvp", "unit_price"],
     "header_labels": {"uvp": "RRP", "discount": "DISCOUNT", "discount_price": "DISCOUNT PRICE"},
     "stock_row_labels": {"quantity": "Stock", "total": "per size"},
     "order_hints": {
@@ -108,7 +109,7 @@
     "sort": "bestseller",
     "order_formulas": true,
     "grand_total_row": true,
-    "hide_unused_sizes": false,
+    "remove_unused_sizes": true,
     "landscape_print": false
   },
 

@@ -757,11 +757,16 @@ def read_template_layout(ws, cfg):
 
 
 def final_size_list(template_sizes, articles, cfg):
+    """Größenspalten der Liste: Vorlage + benötigte Zusatzgrößen. Mit rules.remove_unused_sizes nur Größen,
+    für die mindestens ein Artikel Bestand hat (weniger Spalten, übersichtlicher)."""
     used = {s for a in articles for s in a["stock"]}
     sizes = list(template_sizes)
     for extra in cfg["sizes"]["extra_sizes"]:
         if extra["size"] in used and extra["size"] not in sizes:
             sizes.insert(sizes.index(extra["insert_after"]) + 1, extra["size"])
+    if cfg["rules"].get("remove_unused_sizes"):
+        in_stock = {s for a in articles for s, q in a["stock"].items() if q > 0}
+        sizes = [s for s in sizes if s in in_stock] or sizes[:1]
     return sizes
 
 
@@ -838,7 +843,8 @@ def write_search(ws, row, scfg, fixed_cols, helper_col, first_row, last_row):
     sku_l = get_column_letter(fixed_cols["sku"])
     name_l = get_column_letter(fixed_cols["name"])
     in_col, in_end = fixed_cols["sku"], fixed_cols["name"]
-    res_col, res_end = fixed_cols["unit_price"], fixed_cols["uvp"]
+    res_col = min(fixed_cols["unit_price"], fixed_cols["uvp"])
+    res_end = max(fixed_cols["unit_price"], fixed_cols["uvp"])
     q = f"${sku_l}${row}"
     rng_sku = f"${sku_l}${first_row}:${sku_l}${last_row}"
     rng_name = f"${name_l}${first_row}:${name_l}${last_row}"
@@ -944,14 +950,13 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
     gcfg = cfg.get("product_groups", {})
     sections = section_summary(articles)
 
+    # Reihenfolge der festen Spalten: Bild, SKU, Name, dann Preise wie in mapping.json (excel.price_order),
+    # bei Discount zusätzlich DISCOUNT (%) und DISCOUNT PRICE (Stil wie UNIT PRICE)
+    order = ["image", "sku", "name"] + list(xc.get("price_order", ["unit_price", "uvp"]))
     if show_discount:
-        # Zwei zusätzliche Spalten nach den Preisen: DISCOUNT (%) und DISCOUNT PRICE, Stil wie UNIT PRICE
-        base = len(layout["fixed_order"])
-        layout = dict(layout, fixed_order=layout["fixed_order"] + ["discount", "discount_price"],
-                      fixed_cols=dict(layout["fixed_cols"], discount=base + 1, discount_price=base + 2),
-                      roles=dict(layout["roles"], discount=layout["roles"]["unit_price"],
-                                 discount_price=layout["roles"]["unit_price"]))
-        roles = layout["roles"]
+        order += ["discount", "discount_price"]
+        roles = dict(roles, discount=roles["unit_price"], discount_price=roles["unit_price"])
+    layout = dict(layout, fixed_order=order, fixed_cols={r: i + 1 for i, r in enumerate(order)}, roles=roles)
     n_fixed = len(layout["fixed_order"])
     size_col = {s: n_fixed + 1 + i for i, s in enumerate(sizes)}
     q_col = n_fixed + len(sizes) + 1
@@ -1124,7 +1129,8 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
         rule.formula = [rule.formula[0].replace("{r}", str(r_first)).replace("{p}", str(r_first - 1))]
         ws.conditional_formatting.add(rng, rule)
     if hints and first_article_row:
-        write_legend(ws, 1, size_col[sizes[0]], t_col, widths, hints,
+        # Legende direkt nach dem Titel (ab der Spalte hinter "Name"), damit sie auch bei wenigen Größen passt
+        write_legend(ws, 1, layout["fixed_cols"]["name"] + 1, t_col, widths, hints,
                      roles["size"]["top"], roles["size"]["bottom"])
     if cfg["rules"]["grand_total_row"] and cfg["rules"]["order_formulas"]:
         ws.row_dimensions[row].height = layout["row_heights"]["bottom"]
@@ -1133,14 +1139,12 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
               f"=SUM({q_letter}{r_first}:{q_letter}{last_row})")
         apply(ws.cell(row, t_col), roles["total"]["bottom"],
               f"=SUM({t_letter}{r_first}:{t_letter}{last_row})")
+        for col in (q_col - 1, q_col, t_col):
+            # Gesamtsumme ist ein Ergebnis, kein Eingabefeld: weiß und fett statt orange
+            ws.cell(row, col).fill = PatternFill("solid", fgColor="FFFFFFFF")
+            ws.cell(row, col).font = Font(name="Arial", size=11, bold=True, color=DARK)
 
     ws.freeze_panes = ws.cell(r_first, n_fixed + 1).coordinate
-    if cfg["rules"].get("hide_unused_sizes"):
-        used = {s for a in articles for s in a["stock"]}
-        for s, col in size_col.items():
-            if s not in used:
-                ws.column_dimensions[get_column_letter(col)].hidden = True
-
     if cfg["rules"]["landscape_print"]:
         ws.page_setup.paperSize = ws.PAPERSIZE_A4
         ws.page_setup.orientation = "landscape"

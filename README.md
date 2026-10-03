@@ -134,7 +134,7 @@ Alles steht in `config/mapping.json`:
     und eine eigene `order`.
     Artikel ohne passendes Stichwort landen unter `Other` und werden als `Hinweis:` gemeldet.
   - `order_formulas`, `grand_total_row` – Formeln in der Bestellzeile / Gesamtsumme
-  - `hide_unused_sizes` – Größenspalten ohne Artikel ausblenden (größere Schrift im Druck)
+  - `remove_unused_sizes` – nur Größenspalten, für die mindestens ein Artikel Bestand hat (Standard: an)
   - `landscape_print` – A4-Querformat, schmale Ränder, auf Seitenbreite skaliert, Kopfzeilen auf jeder Seite
 - **Layout ändern** (Farben, Breiten, Schrift): direkt in `template/stocklist_template.xlsx` – das Script übernimmt
   die Formate aus der ersten Artikelzeile (Zeilen 3/4) und der Kopfzeile (Zeile 2). Kopfzeilen-Texte
