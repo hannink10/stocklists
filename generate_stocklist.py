@@ -992,6 +992,7 @@ def nav_layout(sections, widths, first_col, last_col):
 
 
 DARK = "FF2F2F2F"
+JUMP_ROWS = 40  # Sprungziel = Bereich ab Zielzeile über so viele Zeilen -> Ziel erscheint am oberen Bildschirmrand
 GREY_TEXT = "FF7F7F7F"
 BAR_FILL = PatternFill("solid", fgColor="FFF5F5F5")
 THIN = Side(style="thin", color="FFBFBFBF")
@@ -1011,7 +1012,9 @@ def write_nav_links(ws, top_row, nav_rows, section_rows):
         row = top_row + i
         for title, text, start, end in links:
             c = ws.cell(row, start, text)
-            c.hyperlink = Hyperlink(ref=c.coordinate, location=f"'{ws.title}'!A{section_rows[title]}", display=text)
+            # Ziel ist ein Bereich, der höher als der Bildschirm ist: Excel scrollt dann so, dass er oben beginnt
+            r0 = section_rows[title]
+            c.hyperlink = Hyperlink(ref=c.coordinate, location=f"'{ws.title}'!A{r0}:A{r0 + JUMP_ROWS}", display=text)
             c.font = Font(name="Arial", size=10, bold=True, underline="single", color=DARK)
             c.alignment = Alignment(horizontal="center", vertical="center")
             if end > start:
@@ -1064,7 +1067,7 @@ def write_search(ws, row, scfg, fixed_cols, helper_col, first_row, last_row):
     res = ws.cell(row, res_col)
     res.value = (
         f'=IF({q}="","{scfg["empty_hint"]}",IF({h_ref}="-","{scfg["not_found"]}",'
-        f'HYPERLINK("#\'{ws.title}\'!A"&{h_ref},"{scfg["jump"]} "&INDEX(${sku_l}:${sku_l},{h_ref}))))'
+        f'HYPERLINK("#\'{ws.title}\'!A"&{h_ref}&":A"&({h_ref}+{JUMP_ROWS}),"{scfg["jump"]} "&INDEX(${sku_l}:${sku_l},{h_ref}))))'
     )
     res.font = Font(name="Arial", size=10, bold=True, underline="single", color="FF1F4E79")
     res.alignment = Alignment(horizontal="left", vertical="center", indent=1)
