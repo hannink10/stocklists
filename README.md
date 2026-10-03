@@ -30,7 +30,7 @@ pip install -r requirements.txt
 
 ## Gemeinsam nutzen (mehrere Personen)
 
-Den ganzen Projektordner in einen **geteilten Cloud-Ordner** legen (OneDrive, iCloud Drive, Dropbox …) und
+Den ganzen Projektordner in einen **geteilten Cloud-Ordner** legen (bei uns: Dropbox) und
 alle arbeiten darin. So teilen sich alle Einstellungen, Zugangsdaten und die gelernten Kategorien
 (`config/category_overrides.json`); Updates muss nur eine Person einspielen. Die Python-Umgebung legt
 `Stockliste erstellen.command` lokal auf jedem Mac an (`~/Library/Application Support/Stockliste/venv`),

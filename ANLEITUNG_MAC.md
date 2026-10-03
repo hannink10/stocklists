@@ -2,7 +2,7 @@
 
 ## Gemeinsam arbeiten (Johan + Mitarbeiter)
 
-Der Stocklist-Ordner liegt in einem **geteilten Cloud-Ordner** (z.B. OneDrive, iCloud Drive oder Dropbox).
+Der Stocklist-Ordner liegt in einem **geteilten Dropbox-Ordner**.
 Alle arbeiten im **selben Ordner** – dadurch haben alle immer denselben Stand:
 
 - **Kategorien**, die jemand im Terminal zuordnet (`config/category_overrides.json`), gelten sofort für alle.
@@ -20,18 +20,21 @@ nicht geteilt – darum muss sich niemand kümmern.
 
 ### Ordner teilen (einmalig, Johan)
 
-1. Den bisherigen Ordner `stocklists-main` in den Cloud-Ordner verschieben, z.B. nach `OneDrive/Stockliste`.
-   Einen Unterordner **`.venv`** darin vorher löschen (wird nicht mehr gebraucht).
-2. Den Ordner im Cloud-Dienst mit dem Mitarbeiter **teilen, mit Bearbeitungsrechten**.
-3. Rechtsklick auf den Ordner → **„Immer auf diesem Gerät behalten“** (OneDrive) bzw. **„Laden“** (iCloud),
-   damit alle Dateien offline vorliegen.
+1. Einen versteckten Unterordner **`.venv`** im bisherigen Ordner löschen (wird nicht mehr gebraucht). Im Terminal:
+   `cd` + Leerzeichen eintippen, den Ordner `stocklists-main` ins Terminal ziehen, Enter, dann `rm -rf .venv`
+   und Enter. (Im Finder zeigt `Cmd + Shift + .` versteckte Ordner an.)
+2. Den Ordner `stocklists-main` in die Dropbox verschieben und z.B. in **`Stockliste`** umbenennen.
+3. Rechtsklick auf den Ordner → **Teilen** → Mitarbeiter einladen mit **„Kann bearbeiten“**.
+4. Rechtsklick auf den Ordner → **„Offline verfügbar machen“**, damit alle Dateien auf dem Mac liegen
+   (bei „Nur online“ kann das Programm sie nicht lesen).
 
 ### Auf dem Mac des Mitarbeiters (einmalig)
 
-1. Die Freigabe annehmen und den Ordner im Finder verfügbar machen (OneDrive: **„Zu meinen Dateien
-   hinzufügen“**), dann ebenfalls **„Immer auf diesem Gerät behalten“**.
+1. Dropbox-Einladung annehmen; der Ordner erscheint in seiner Dropbox. Rechtsklick → **„Offline verfügbar machen“**.
 2. Python installieren (siehe unten, Schritt 1) und den ersten Start freigeben (Schritt 4).
    Schritte 2 und 3 entfallen – Projekt und Zugangsdaten sind schon im geteilten Ordner.
+3. Lässt sich `Stockliste erstellen.command` trotzdem nicht starten, im Terminal im Dropbox-Ordner einmal
+   `chmod +x "Stockliste erstellen.command"` eingeben.
 
 ## Einmalig einrichten (ca. 10 Minuten)
 
@@ -87,6 +90,7 @@ wieder in `input` legen.
 ## Neue Version des Programms
 
 Nur **eine Person** spielt Updates ein: die geänderten Dateien (meist `generate_stocklist.py` und
-`config/mapping.json`) auf GitHub öffnen, über **Download raw file** herunterladen und im geteilten Ordner
-ersetzen. Alle anderen haben die neue Version automatisch. `config/shopify.env` und
+`config/mapping.json`) auf GitHub öffnen, über **Download raw file** herunterladen und im Dropbox-Ordner
+ersetzen. Wird `Stockliste erstellen.command` ersetzt, danach einmal im Terminal
+`chmod +x "Stockliste erstellen.command"` und `xattr -d com.apple.quarantine "Stockliste erstellen.command"`. Alle anderen haben die neue Version automatisch. `config/shopify.env` und
 `config/category_overrides.json` dabei **nicht** ersetzen oder löschen.
