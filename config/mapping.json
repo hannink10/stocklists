@@ -31,7 +31,8 @@
         "_note": "Schuhmodelle von Flowers heißen nicht 'Sneaker' – zusätzliche Stichwörter, geprüft nach den allgemeinen.",
         "order": ["Shoes", "Shirts", "Hoodies", "Knitwear", "Jackets", "Pants", "Accessories"],
         "rules": [["SEED", "Shoes"], ["OFFSHOOT", "Shoes"], ["SENSE", "Shoes"], ["BLEND", "Shoes"], ["RADICLE", "Shoes"],
-                  ["AENERGY", "Shoes"], ["BLANC CANVAS", "Shoes"], ["THE OG", "Shoes"], ["HUGO", "Shoes"]]
+                  ["AENERGY", "Shoes"], ["BLANC CANVAS", "Shoes"], ["THE OG", "Shoes"], ["HUGO", "Shoes"],
+                  ["FORGET ME NOT", "Shoes"]]
       },
       "sku_rule": {
         "_note": "Der Reihe nach geprüft, das erste passende Muster mit bekannter Größe gewinnt. Sonst One-Size (mit Hinweis).",
