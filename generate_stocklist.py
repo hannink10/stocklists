@@ -642,7 +642,8 @@ def arrange_sets(rest, gcfg):
             arts.sort(key=part_index)
             label = scfg.get("label", "SET") + (f" · {color(arts[0]).upper()}" if color(arts[0]) else "")
             for art in arts:
-                art["set_label"] = label if len(arts) > 1 else None
+                # Zwischenzeile nur, wenn in mapping.json eingeschaltet (show_label)
+                art["set_label"] = label if len(arts) > 1 and scfg.get("show_label") else None
             new += arts
         start = rest.index(members[0])
         rest[start:start + len(members)] = new

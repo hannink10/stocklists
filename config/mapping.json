@@ -27,8 +27,8 @@
         "order": ["Suits", "Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Shoes", "Accessories"],
         "priority_rules": [["BLAZER", "Suits"], ["TAILORED BAGGY PANTS", "Suits"]],
         "sets": {
-          "Suits": {"label": "SUIT SET", "parts": ["BLAZER", "TAILORED BAGGY PANTS"],
-                    "_note": "Blazer und Hose gleicher Farbe (Text nach dem letzten ' - ') stehen als Set untereinander"}
+          "Suits": {"parts": ["BLAZER", "TAILORED BAGGY PANTS"], "show_label": false, "label": "SUIT SET",
+                    "_note": "Blazer und Hose gleicher Farbe (Text nach dem letzten ' - ') stehen direkt untereinander, Blazer zuerst. show_label true = Zwischenzeile 'SUIT SET · FARBE'."}
         }
       }
     },
