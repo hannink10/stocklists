@@ -13,6 +13,7 @@ Mapping und Regeln stehen in config/mapping.json.
 import argparse
 import csv
 import json
+import os
 import re
 import shutil
 import sys
@@ -357,6 +358,14 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
                 )
                 continue
             name = re.sub(r"\s*[-/]?\s*" + re.escape(size) + r"$", "", val["name"]).strip()
+            if name == val["name"] and converted:
+                # umgerechnete Größe: im Namen steht meist die Ursprungsgröße, z.B. 'FORGET ME NOT MEN - 7,5'
+                name = re.sub(r"\s*[-/]\s*\d{1,2}(?:[,.]\d)?$", "", val["name"]).strip()
+            if converted:
+                # Größensystem-Zusatz entfernen: 'SEED.ONE - MEMO-Z - EU Women' -> 'SEED.ONE - MEMO-Z'
+                stripped = re.sub(r"\s*[-/]\s*EU(\s+(WOMEN|WMNS|MEN))?$", "", name, flags=re.I).strip()
+                if stripped != name:
+                    name = stripped
             if name == val["name"]:
                 name_without_size.append(sku)
 
@@ -367,11 +376,7 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
                 "stock": OrderedDict(), "skus": [], "first_line": line,
                 "image": None, "sold": 0, "prices": {"unit_price": [], "uvp": [], "discount": []},
             }
-        elif art["name"] != name:
-            errors.append(
-                f"Zeile {line}: Artikel {base} hat abweichende Angabe bei 'name' "
-                f"('{name}' statt '{art['name']}' aus Zeile {art['first_line']})."
-            )
+        art.setdefault("names", []).append(name)
         art["prices"]["unit_price"].append((price, size))
         art["prices"]["uvp"].append((uvp, size))
         art["prices"]["discount"].append((discount or Decimal(0), size))
@@ -386,6 +391,7 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
         art["stock"][size] = int(stock)
         art["skus"].append(sku)
 
+    resolve_name_conflicts(list(articles.values()), warnings)
     resolve_price_conflicts(list(articles.values()), cfg, warnings)
     for art in articles.values():
         art["discount_price"] = cents(art["unit_price"] * (1 - art["discount"]))
@@ -423,6 +429,37 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
 def model_name(name):
     """Produktname ohne Farbe: 'QUOTE T-SHIRT - CREAM' -> 'QUOTE T-SHIRT'."""
     return name.rsplit(" - ", 1)[0].strip() if " - " in name else name
+
+
+def common_name(names):
+    """Gemeinsamer Namensanfang an einer Wortgrenze, ohne angehängte Trenner und 'EU'
+    ('SEED.ONE - MEMO-Z - EU Women' + 'SEED.ONE - MEMO-Z - EU' -> 'SEED.ONE - MEMO-Z')."""
+    prefix = os.path.commonprefix(names)
+    if any(len(n) > len(prefix) and n[len(prefix)] not in " -/" for n in names):
+        prefix = prefix[:prefix.rfind(" ")] if " " in prefix else ""
+    prefix = re.sub(r"(\s*[-/]\s*|\s+)(EU)?\s*$", "", prefix).strip(" -/")
+    prefix = re.sub(r"\s*[-/]\s*EU$", "", prefix).strip(" -/")
+    return prefix
+
+
+def resolve_name_conflicts(articles, warnings):
+    """Haben die Größen eines Artikels unterschiedliche Namen (z.B. '… - EU Women' und '… - EU'),
+    gilt der gemeinsame Namensanfang, sonst der häufigste Name. Kein Abbruch, aber Hinweis."""
+    changed = []
+    for art in articles:
+        raw = art.pop("names", [art["name"]])
+        names = list(OrderedDict.fromkeys(raw))
+        if len(names) == 1:
+            art["name"] = names[0]
+            continue
+        chosen = common_name(names)
+        if len(chosen) < 3:
+            chosen = Counter(raw).most_common(1)[0][0]
+        art["name"] = chosen
+        changed.append(f"{art['sku']}: " + " / ".join(f"'{n}'" for n in names) + f" → '{chosen}'")
+    if changed:
+        warnings.append(f"{len(changed)} Artikel mit unterschiedlichen Namen je Größe – gemeinsamer Name verwendet: "
+                        + "; ".join(changed[:5]) + (" …" if len(changed) > 5 else ""))
 
 
 def resolve_price_conflicts(articles, cfg, warnings):
