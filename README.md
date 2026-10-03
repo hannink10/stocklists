@@ -28,6 +28,14 @@ Manuell: Python 3.9+ installieren, dann im Projektordner:
 pip install -r requirements.txt
 ```
 
+## Gemeinsam nutzen (mehrere Personen)
+
+Den ganzen Projektordner in einen **geteilten Cloud-Ordner** legen (OneDrive, iCloud Drive, Dropbox …) und
+alle arbeiten darin. So teilen sich alle Einstellungen, Zugangsdaten und die gelernten Kategorien
+(`config/category_overrides.json`); Updates muss nur eine Person einspielen. Die Python-Umgebung legt
+`Stockliste erstellen.command` lokal auf jedem Mac an (`~/Library/Application Support/Stockliste/venv`),
+nicht im geteilten Ordner. Details: `ANLEITUNG_MAC.md`.
+
 ## Neue Stockliste erstellen
 
 1. Neue CSV in `input/` legen (alte CSV vorher entfernen – wird normalerweise automatisch archiviert).
