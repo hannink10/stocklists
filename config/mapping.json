@@ -13,12 +13,36 @@
     "sku":        {"header": "SKU", "aliases": ["Artikelnummer", "Art.-Nr.", "Art Nr", "ArtNr", "Artikelnr", "Item Number", "Item No", "Article Number", "Article No", "Product Code", "Style Number", "Variant SKU"]},
     "name":       {"header": "NAME", "aliases": ["Artikelname", "Bezeichnung", "Artikelbezeichnung", "Produktname", "Product Name", "Item Name", "Description", "Beschreibung", "Title", "Titel"]},
     "uvp":        {"header": "UVP", "aliases": ["RRP", "Retail Price", "Retail", "MSRP", "VK", "VK-Preis", "Verkaufspreis", "VK brutto", "Endkundenpreis", "Preis brutto"]},
-    "unit_price": {"header": "UNIT PRICE", "occurrence": 2, "aliases": ["Händlerpreis", "Haendlerpreis", "EK", "EK-Preis", "EK netto", "Einkaufspreis", "Wholesale", "Wholesale Price", "WHS", "B2B Price", "B2B-Preis", "Net Price", "Nettopreis", "Price"]},
+    "unit_price": {"header": "UNIT PRICE", "occurrence": 2, "required": false, "_note": "fehlt die Spalte, wird nach dem Markup gefragt (EK = UVP ÷ Markup)", "aliases": ["Händlerpreis", "Haendlerpreis", "EK", "EK-Preis", "EK netto", "Einkaufspreis", "Wholesale", "Wholesale Price", "WHS", "B2B Price", "B2B-Preis", "Net Price", "Nettopreis", "Price"]},
+    "discount":   {"header": "DISCOUNT", "required": false, "_note": "optional; wenn vorhanden: Spalten DISCOUNT und DISCOUNT PRICE in der Liste", "aliases": ["Discount %", "Discount in %", "Rabatt", "Rabatt %", "Rabatt in %", "Nachlass", "Nachlass %", "Reduction", "Sale %"]},
     "stock":      {"header": "AVAILABLE", "aliases": ["Bestand", "Lager", "Verfügbar", "Verfügbarer Bestand", "Lagerbestand", "Stock", "Available Stock", "Qty", "Quantity", "Menge", "Inventory", "On Hand"]}
   },
 
   "brands": {
-    "_note": "Nur falls eine Marke ganz eigene Spaltennamen hat, z.B.: \"Flowers\": {\"columns\": {\"unit_price\": {\"header\": \"EK Händler\"}}}"
+    "_note": "Einstellungen je Marke (Name wie in config/shopify.env). columns: eigene Spaltennamen, z.B. {\"unit_price\": {\"header\": \"EK Händler\"}}. sku_rule: wie die Größe in der SKU steht – Standard ist Trennzeichen '-' (1032212-XS), 'patterns' = Liste von Mustern (reguläre Ausdrücke mit base und size).",
+    "Reternity": {
+      "product_groups": {
+        "_note": "sku_prefixes: SKU-Anfang -> Kategorie, wird vor den Stichwörtern im Namen geprüft.",
+        "sku_prefixes": [["40", "Shoes"]]
+      }
+    },
+    "Flowers": {
+      "product_groups": {
+        "_note": "Schuhmodelle von Flowers heißen nicht 'Sneaker' – zusätzliche Stichwörter, geprüft nach den allgemeinen.",
+        "order": ["Shoes", "Shirts", "Hoodies", "Knitwear", "Jackets", "Pants", "Accessories"],
+        "rules": [["SEED", "Shoes"], ["OFFSHOOT", "Shoes"], ["SENSE", "Shoes"], ["BLEND", "Shoes"], ["RADICLE", "Shoes"],
+                  ["AENERGY", "Shoes"], ["BLANC CANVAS", "Shoes"], ["THE OG", "Shoes"], ["HUGO", "Shoes"]]
+      },
+      "sku_rule": {
+        "_note": "Der Reihe nach geprüft, das erste passende Muster mit bekannter Größe gewinnt. Sonst One-Size (mit Hinweis).",
+        "mode": "patterns",
+        "patterns": [
+          "(?P<base>FFS\\d{3})(?P<size>\\d{2})",
+          "(?P<base>.+)-(?P<size>[^-]+)",
+          "(?P<base>.+_\\d)(?P<size>XXL|XL|L|M|S|XS)"
+        ]
+      }
+    }
   },
 
   "excel": {
@@ -40,7 +64,8 @@
     "sheet_name": "Stocklist {brand} {date}",
     "grand_total_label": "TOTAL",
     "_labels_note": "Texte in der Liste, die von der Vorlage abweichen sollen (Englisch). Leer lassen = Text aus der Vorlage.",
-    "header_labels": {"uvp": "RRP"},
+    "price_order": ["uvp", "unit_price"],
+    "header_labels": {"uvp": "RRP", "discount": "DISCOUNT", "discount_price": "DISCOUNT PRICE"},
     "stock_row_labels": {"quantity": "Stock", "total": "per size"},
     "order_hints": {
       "_note": "Legende oben + Hinweis beim Klick in die orange Bestellzeile. limit_to_stock: mehr als der Bestand wird abgelehnt.",
@@ -72,7 +97,9 @@
     "no_size_column": "One-Size",
     "extra_sizes": [
       {"size": "S/M",  "insert_after": "XXL"},
-      {"size": "L/XL", "insert_after": "S/M"}
+      {"size": "L/XL", "insert_after": "S/M"},
+      {"size": "35",   "insert_after": "34"},
+      {"size": "37",   "insert_after": "36"}
     ]
   },
 
@@ -82,7 +109,7 @@
     "sort": "bestseller",
     "order_formulas": true,
     "grand_total_row": true,
-    "hide_unused_sizes": false,
+    "remove_unused_sizes": true,
     "landscape_print": false
   },
 
@@ -94,17 +121,21 @@
     "navigation": true,
     "navigation_label": "CONTENTS",
     "other_group": "Other",
-    "order": ["Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Accessories"],
+    "order": ["Hoodies", "Shirts", "Jackets", "Pants", "Knitwear", "Shoes", "Accessories"],
     "rules": [
       ["KNIT", "Knitwear"], ["SWEATER", "Knitwear"], ["JERSEY", "Knitwear"], ["POLO", "Knitwear"], ["CARDIGAN", "Knitwear"],
+      ["BOXERSHORTS", "Accessories"], ["BOXER", "Accessories"], ["SOCKS", "Accessories"], ["FRAGRANCE", "Accessories"],
       ["SHORTS", "Pants"], ["JORTS", "Pants"],
       ["ZIP SHIRT", "Shirts"], ["OVERSHIRT", "Shirts"],
       ["HOODIE", "Hoodies"], ["HALF ZIP", "Hoodies"], ["ZIP JACKET", "Hoodies"], ["SWEATSHIRT", "Hoodies"], ["CREWNECK", "Hoodies"],
       ["JACKET", "Jackets"], ["PUFFER", "Jackets"], ["VEST", "Jackets"], ["BOMBER", "Jackets"], ["COAT", "Jackets"],
-      ["SHIRT", "Shirts"], ["LONGSLEEVE", "Shirts"], ["TEE", "Shirts"], ["TANK TOP", "Shirts"], ["TOP", "Shirts"], ["FLANNEL", "Shirts"],
+      ["SHIRT", "Shirts"], ["TSHIRT", "Shirts"], ["LONGSLEEVE", "Shirts"], ["TEE", "Shirts"], ["TANK TOP", "Shirts"], ["TOP", "Shirts"], ["FLANNEL", "Shirts"],
       ["PANTS", "Pants"], ["SWEATPANTS", "Pants"], ["JOGGER", "Pants"], ["DENIM", "Pants"], ["JEANS", "Pants"], ["CARGO", "Pants"], ["TROUSERS", "Pants"],
+      ["SNEAKER", "Shoes"], ["SNEAKERS", "Shoes"], ["SHOE", "Shoes"], ["SHOES", "Shoes"], ["BOOT", "Shoes"], ["BOOTS", "Shoes"],
+      ["LOAFER", "Shoes"], ["SLIDES", "Shoes"], ["SANDAL", "Shoes"], ["SANDALS", "Shoes"], ["MULE", "Shoes"], ["CLOG", "Shoes"],
       ["BEANIE", "Accessories"], ["CAP", "Accessories"], ["HAT", "Accessories"], ["BAG", "Accessories"], ["BELT", "Accessories"],
-      ["SOCKS", "Accessories"], ["SCARF", "Accessories"], ["WALLET", "Accessories"]
+      ["SOCKS", "Accessories"], ["SCARF", "Accessories"], ["WALLET", "Accessories"],
+      ["BACKPACK", "Accessories"], ["POUCH", "Accessories"], ["PINS", "Accessories"], ["KNIFE", "Accessories"]
     ]
   },
 

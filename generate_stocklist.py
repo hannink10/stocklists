@@ -20,7 +20,7 @@ import unicodedata
 from collections import Counter, OrderedDict
 from copy import copy
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 import pandas as pd
@@ -134,9 +134,66 @@ def parse_number(text, cfg):
         raise ValueError(text)
 
 
+def parse_discount(text, cfg):
+    """Discount aus der CSV -> Anteil (0.30 für 30 %). Versteht '30', '30%', '30,0 %', '0,3'. Leer -> None.
+    Werte unter 1 ohne %-Zeichen gelten als Anteil (0,3 = 30 %), sonst als Prozent."""
+    s = text.strip()
+    if s == "":
+        return None
+    value = parse_number(s.replace("%", ""), cfg)
+    if value is None:
+        return None
+    frac = value / 100 if ("%" in s or value >= 1) else value
+    if frac < 0 or frac >= 1:
+        raise ValueError(text)
+    return frac
+
+
+def cents(value):
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 # ---------------------------------------------------------------------------
 # Prüfung & Aufbereitung
 # ---------------------------------------------------------------------------
+
+def brand_config(cfg, brand):
+    """Einstellungen für eine Marke aus mapping.json → brands (Name wie in config/shopify.env)."""
+    for name, bcfg in cfg.get("brands", {}).items():
+        if not name.startswith("_") and isinstance(bcfg, dict) and normalize_name(name) == normalize_name(brand or ""):
+            return bcfg
+    return {}
+
+
+def apply_brand_groups(cfg, brand):
+    """Produktgruppen je Marke: zusätzliche Stichwörter (nach den allgemeinen geprüft) und eigene Reihenfolge."""
+    bg = brand_config(cfg, brand).get("product_groups", {})
+    gcfg = cfg.setdefault("product_groups", {})
+    if bg.get("rules"):
+        gcfg["rules"] = list(gcfg.get("rules", [])) + list(bg["rules"])
+    if bg.get("order"):
+        gcfg["order"] = list(bg["order"])
+    if bg.get("sku_prefixes"):
+        gcfg["sku_prefixes"] = list(bg["sku_prefixes"])
+
+
+def split_sku(sku, rule, known_sizes):
+    """SKU -> (Artikelnummer, Größe). Größe None = Artikel ohne Größe (One-Size).
+    rule 'separator': Größe nach dem letzten Trennzeichen ('1032212-XS' -> '1032212', 'XS').
+    rule 'patterns':  Liste regulärer Ausdrücke mit den Gruppen 'base' und 'size'; der erste, der passt
+                      und eine bekannte Größe liefert, gewinnt ('FFS10141' -> 'FFS101', '41')."""
+    if rule.get("mode") == "patterns":
+        for pattern in rule["patterns"]:
+            m = re.fullmatch(pattern, sku)
+            if m and m.group("size") in known_sizes:
+                return m.group("base"), m.group("size")
+        return sku, None
+    sep = rule.get("separator", "-")
+    if sep in sku:
+        base, size = sku.rsplit(sep, 1)
+        return base, size
+    return sku, None
+
 
 def norm_header(text):
     """Spaltenname zum Vergleichen: Großbuchstaben, ohne Akzente/Umlaute-Punkte, Satzzeichen und doppelte Leerzeichen."""
@@ -144,7 +201,8 @@ def norm_header(text):
     return re.sub(r"[^A-Z0-9]+", " ", text).strip()
 
 
-ROLE_LABELS = {"sku": "SKU", "name": "Name", "uvp": "UVP/RRP", "unit_price": "Händlerpreis", "stock": "Bestand"}
+ROLE_LABELS = {"sku": "SKU", "name": "Name", "uvp": "UVP/RRP", "unit_price": "Händlerpreis", "stock": "Bestand",
+               "discount": "Discount"}
 
 
 def column_letter_csv(i):
@@ -155,10 +213,7 @@ def detect_columns(raw, cfg, brand, warnings):
     """Findet Kopfzeile und Spalten über ihre Namen (mit Synonymen aus mapping.json, je Marke überschreibbar).
     Liefert (Zeilenindex der Kopfzeile, {Feld: Spaltenindex}, Beschreibung für die Ausgabe)."""
     columns = {k: v for k, v in cfg["columns"].items() if not k.startswith("_")}
-    brand_cols = {}
-    for name, bcfg in cfg.get("brands", {}).items():
-        if not name.startswith("_") and normalize_name(name) == normalize_name(brand or ""):
-            brand_cols = bcfg.get("columns", {})
+    brand_cols = brand_config(cfg, brand).get("columns", {})
 
     def aliases(role):
         spec = dict(columns[role], **brand_cols.get(role, {}))
@@ -187,8 +242,9 @@ def detect_columns(raw, cfg, brand, warnings):
             if hits:
                 break
         if not hits:
-            errors.append(f"Keine Spalte für '{ROLE_LABELS.get(role, role)}' gefunden "
-                          f"(gesucht: {', '.join(spec_names(columns[role], brand_cols.get(role)))}).")
+            if spec.get("required", True):
+                errors.append(f"Keine Spalte für '{ROLE_LABELS.get(role, role)}' gefunden "
+                              f"(gesucht: {', '.join(spec_names(columns[role], brand_cols.get(role)))}).")
             continue
         pick, note = hits[0], ""
         if len(hits) > 1:
@@ -224,14 +280,17 @@ def spec_names(spec, brand_spec=None):
     return [spec["header"]] + spec.get("aliases", [])
 
 
-def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0):
-    sep = cfg["sizes"]["sku_separator"]
+def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, brand=None, markup=None):
+    """markup: EK-Preis = UVP ÷ markup (nur wenn die CSV keine EK-Spalte hat)."""
+    rule = brand_config(cfg, brand).get("sku_rule") or {"mode": "separator", "separator": cfg["sizes"]["sku_separator"]}
     no_size = cfg["sizes"]["no_size_column"]
     extra = [e["size"] for e in cfg["sizes"]["extra_sizes"]]
     known_sizes = set(template_sizes) | set(extra)
 
     errors = []
     negative = []
+    no_size_skus = []       # SKU ohne erkennbare Größe (Suffix-Regel) -> One-Size
+    name_without_size = []  # Name endet nicht auf die Größe -> Name unverändert übernommen
     seen_skus = {}
     articles = OrderedDict()
 
@@ -242,10 +301,11 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0):
 
         if all(v == "" for v in val.values()):
             continue
-        for k in ("sku", "name", "uvp", "unit_price", "stock"):
+        required = [k for k in ("sku", "name", "uvp", "unit_price", "stock") if k in positions]
+        for k in required:
             if val[k] == "":
-                errors.append(f"Zeile {line}: Pflichtfeld '{cfg['columns'][k]['header']}' ist leer.")
-        if any(val[k] == "" for k in ("sku", "name", "uvp", "unit_price", "stock")):
+                errors.append(f"Zeile {line}: Pflichtfeld '{ROLE_LABELS.get(k, k)}' ist leer.")
+        if any(val[k] == "" for k in required):
             continue
 
         sku = val["sku"]
@@ -255,11 +315,12 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0):
         seen_skus[sku] = line
 
         try:
-            uvp = parse_number(val["uvp"], cfg)
-            price = parse_number(val["unit_price"], cfg)
+            uvp = cents(parse_number(val["uvp"], cfg))  # Preise immer auf 2 Nachkommastellen
+            price = cents(parse_number(val["unit_price"], cfg)) if "unit_price" in positions else cents(uvp / markup)
             stock = parse_number(val["stock"], cfg)
+            discount = parse_discount(val["discount"], cfg) if "discount" in positions else None
         except ValueError as e:
-            errors.append(f"Zeile {line} (SKU {sku}): ungültige Zahl '{e}'.")
+            errors.append(f"Zeile {line} (SKU {sku}): ungültiger Wert '{e}'.")
             continue
         if stock != stock.to_integral_value():
             errors.append(f"Zeile {line} (SKU {sku}): ungültiger Bestand '{val['stock']}'.")
@@ -274,27 +335,29 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0):
         if price > uvp:
             warnings.append(f"Zeile {line} (SKU {sku}): UNIT PRICE {price} ist höher als UVP {uvp}.")
 
-        # Artikelnummer und Größe trennen
-        if sep in sku:
-            base, size = sku.rsplit(sep, 1)
+        # Artikelnummer und Größe trennen (Regel je Marke, siehe mapping.json → brands → sku_rule)
+        base, size = split_sku(sku, rule, known_sizes)
+        if size is None:
+            size, name = no_size, val["name"]
+            if rule.get("mode") == "patterns":
+                no_size_skus.append(sku)
+        else:
             if size not in known_sizes:
                 errors.append(
                     f"Zeile {line}: unbekannte Größe '{size}' in SKU '{sku}'. "
                     "Bitte in mapping.json unter sizes.extra_sizes ergänzen."
                 )
                 continue
-            name = re.sub(r"\s*-?\s*" + re.escape(size) + r"$", "", val["name"]).strip()
+            name = re.sub(r"\s*[-/]?\s*" + re.escape(size) + r"$", "", val["name"]).strip()
             if name == val["name"]:
-                warnings.append(f"Zeile {line}: Name '{val['name']}' endet nicht auf Größe '{size}'.")
-        else:
-            base, size, name = sku, no_size, val["name"]
+                name_without_size.append(sku)
 
         art = articles.get(base)
         if art is None:
             art = articles[base] = {
                 "sku": base, "name": name, "uvp": uvp, "unit_price": price,
                 "stock": OrderedDict(), "skus": [], "first_line": line,
-                "image": None, "sold": 0, "prices": {"unit_price": [], "uvp": []},
+                "image": None, "sold": 0, "prices": {"unit_price": [], "uvp": [], "discount": []},
             }
         elif art["name"] != name:
             errors.append(
@@ -303,12 +366,22 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0):
             )
         art["prices"]["unit_price"].append((price, size))
         art["prices"]["uvp"].append((uvp, size))
+        art["prices"]["discount"].append((discount or Decimal(0), size))
         if size in art["stock"]:
             errors.append(f"Zeile {line}: Artikel {base} hat Größe '{size}' mehrfach.")
         art["stock"][size] = int(stock)
         art["skus"].append(sku)
 
     resolve_price_conflicts(list(articles.values()), cfg, warnings)
+    for art in articles.values():
+        art["discount_price"] = cents(art["unit_price"] * (1 - art["discount"]))
+    if no_size_skus:
+        warnings.append(f"{len(no_size_skus)} SKU(s) ohne erkennbare Größe – als One-Size übernommen "
+                        "(falls falsch: Muster in mapping.json → brands → sku_rule ergänzen): "
+                        + ", ".join(no_size_skus[:15]) + (" …" if len(no_size_skus) > 15 else ""))
+    if name_without_size:
+        warnings.append(f"{len(name_without_size)} Zeile(n): Name endet nicht auf die Größe (Name unverändert übernommen), z.B. "
+                        + ", ".join(name_without_size[:5]))
     if negative:
         warnings.append(f"{len(negative)} Größe(n) mit negativem Bestand auf 0 gesetzt: " + ", ".join(negative))
     if errors:
@@ -339,16 +412,18 @@ def resolve_price_conflicts(articles, cfg, warnings):
     """Haben die Größen eines Artikels unterschiedliche Preise, gilt der häufigste Preis.
     Bei Gleichstand entscheidet der Preis, den dasselbe Modell in anderen Farben hat;
     ist es dann immer noch offen, der höhere Preis. Jede Abweichung wird als Hinweis gemeldet."""
-    labels = {"unit_price": cfg["columns"]["unit_price"]["header"], "uvp": cfg["columns"]["uvp"]["header"]}
+    labels = {"unit_price": "EK-Preis", "uvp": "UVP", "discount": "Discount"}
     by_model = {}
     for art in articles:
         by_model.setdefault(model_name(art["name"]), []).append(art)
 
-    def fmt(v):
-        return f"{v:.2f}".replace(".", ",") + " €"
-
     for art in articles:
         for key, entries in art["prices"].items():
+            def fmt(v, key=key):
+                if key == "discount":
+                    return f"{v * 100:.0f} %"
+                return f"{v:.2f}".replace(".", ",") + " €"
+
             counts = Counter(v for v, _ in entries)
             if len(counts) == 1:
                 art[key] = entries[0][0]
@@ -380,8 +455,12 @@ def resolve_price_conflicts(articles, cfg, warnings):
             )
 
 
-def product_group(name, gcfg):
-    """Produktgruppe aus dem Artikelnamen (ohne Farbe): erste passende Regel gewinnt."""
+def product_group(name, gcfg, sku=None):
+    """Produktgruppe: zuerst SKU-Anfang (sku_prefixes, z.B. '40' = Schuhe), dann Stichwort im Artikelnamen
+    (ohne Farbe); jeweils gewinnt die erste passende Regel."""
+    for prefix, group in gcfg.get("sku_prefixes", []):
+        if sku and str(sku).upper().startswith(str(prefix).upper()):
+            return group
     text = " " + normalize_name(model_name(name)) + " "
     for keyword, group in gcfg["rules"]:
         if " " + normalize_name(keyword) + " " in text:
@@ -417,7 +496,7 @@ def sort_articles(articles, cfg, warnings):
     order = list(gcfg["order"])
     rest = [a for a in articles if id(a) not in top_ids]
     for art in rest:
-        art["section"] = product_group(art["name"], gcfg)
+        art["section"] = product_group(art["name"], gcfg, art["sku"])
         if art["section"] not in order:
             order.append(art["section"])
     rest.sort(key=lambda a: order.index(a["section"]))  # stabil: innerhalb der Gruppe bleibt die Sortierung oben
@@ -463,6 +542,63 @@ def select_shop(shops, wanted):
             print()
             return shops[int(answer) - 1]
         print(f"Bitte eine Zahl von 1 bis {len(shops)} eingeben.")
+
+
+SORT_CHOICES = [
+    ("bestseller", "Bestseller & Kategorien"),
+    ("stock", "Nach Bestand (höchster Bestand zuerst, ohne Kategorien)"),
+]
+
+
+def select_sort(wanted, cfg):
+    """Sortierung für diesen Lauf: per --sort, sonst Auswahl im Fenster, ohne Fenster Standard aus mapping.json."""
+    keys = [k for k, _ in SORT_CHOICES]
+    if wanted:
+        choice = wanted
+    elif sys.stdin.isatty():
+        print("Wie soll sortiert werden?")
+        for i, (_, label) in enumerate(SORT_CHOICES, 1):
+            print(f"  {i}  {label}")
+        while True:
+            answer = input("Nummer eingeben und Enter drücken: ").strip()
+            if answer.isdigit() and 1 <= int(answer) <= len(keys):
+                choice = keys[int(answer) - 1]
+                print()
+                break
+            print(f"Bitte eine Zahl von 1 bis {len(keys)} eingeben.")
+    else:
+        choice = "bestseller" if cfg["rules"]["sort"] == "bestseller" else "stock"
+    if choice == "stock":
+        cfg["rules"]["sort"] = "stock_desc"
+        cfg.setdefault("product_groups", {})["enabled"] = False
+    else:
+        cfg["rules"]["sort"] = "bestseller"
+    return dict(SORT_CHOICES)[choice]
+
+
+def ask_markup(wanted):
+    """Markup für den EK-Preis (EK = UVP ÷ Markup): per --markup, sonst Abfrage im Fenster."""
+    def parse(text):
+        try:
+            value = Decimal(text.strip().replace(",", "."))
+        except InvalidOperation:
+            return None
+        return value if value >= 1 else None
+
+    if wanted:
+        value = parse(wanted)
+        if value is None:
+            raise StocklistError(f"Ungültiges Markup '{wanted}' (z.B. 2,5).")
+        return value
+    if not sys.stdin.isatty():
+        raise StocklistError("Die CSV hat keinen EK-Preis. Bitte Markup angeben, z.B. --markup 2,5")
+    print("Die CSV hat keinen EK-Preis – er wird aus der UVP berechnet (EK = UVP ÷ Markup).")
+    while True:
+        value = parse(input("Markup eingeben (z.B. 2,5) und Enter drücken: "))
+        if value is not None:
+            print()
+            return value
+        print("Bitte eine Zahl ab 1 eingeben, z.B. 2,5.")
 
 
 def normalize_name(name):
@@ -621,11 +757,16 @@ def read_template_layout(ws, cfg):
 
 
 def final_size_list(template_sizes, articles, cfg):
+    """Größenspalten der Liste: Vorlage + benötigte Zusatzgrößen. Mit rules.remove_unused_sizes nur Größen,
+    für die mindestens ein Artikel Bestand hat (weniger Spalten, übersichtlicher)."""
     used = {s for a in articles for s in a["stock"]}
     sizes = list(template_sizes)
     for extra in cfg["sizes"]["extra_sizes"]:
         if extra["size"] in used and extra["size"] not in sizes:
             sizes.insert(sizes.index(extra["insert_after"]) + 1, extra["size"])
+    if cfg["rules"].get("remove_unused_sizes"):
+        in_stock = {s for a in articles for s, q in a["stock"].items() if q > 0}
+        sizes = [s for s in sizes if s in in_stock] or sizes[:1]
     return sizes
 
 
@@ -702,7 +843,8 @@ def write_search(ws, row, scfg, fixed_cols, helper_col, first_row, last_row):
     sku_l = get_column_letter(fixed_cols["sku"])
     name_l = get_column_letter(fixed_cols["name"])
     in_col, in_end = fixed_cols["sku"], fixed_cols["name"]
-    res_col, res_end = fixed_cols["unit_price"], fixed_cols["uvp"]
+    res_col = min(fixed_cols["unit_price"], fixed_cols["uvp"])
+    res_end = max(fixed_cols["unit_price"], fixed_cols["uvp"])
     q = f"${sku_l}${row}"
     rng_sku = f"${sku_l}${first_row}:${sku_l}${last_row}"
     rng_name = f"${name_l}${first_row}:${name_l}${last_row}"
@@ -797,7 +939,7 @@ def write_section_row(ws, row, title, last_col, n=None):
     ws.row_dimensions[row].height = 28
 
 
-def write_workbook(template_path, out_path, articles, cfg, today, brand):
+def write_workbook(template_path, out_path, articles, cfg, today, brand, show_discount=False):
     wb = load_workbook(template_path)
     ws = wb.worksheets[0]
     xc = cfg["excel"]
@@ -808,6 +950,13 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     gcfg = cfg.get("product_groups", {})
     sections = section_summary(articles)
 
+    # Reihenfolge der festen Spalten: Bild, SKU, Name, dann Preise wie in mapping.json (excel.price_order),
+    # bei Discount zusätzlich DISCOUNT (%) und DISCOUNT PRICE (Stil wie UNIT PRICE)
+    order = ["image", "sku", "name"] + list(xc.get("price_order", ["unit_price", "uvp"]))
+    if show_discount:
+        order += ["discount", "discount_price"]
+        roles = dict(roles, discount=roles["unit_price"], discount_price=roles["unit_price"])
+    layout = dict(layout, fixed_order=order, fixed_cols={r: i + 1 for i, r in enumerate(order)}, roles=roles)
     n_fixed = len(layout["fixed_order"])
     size_col = {s: n_fixed + 1 + i for i, s in enumerate(sizes)}
     q_col = n_fixed + len(sizes) + 1
@@ -865,7 +1014,7 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         apply(ws.cell(hr, col), roles["size"]["header"], s)
     apply(ws.cell(hr, q_col), roles["quantity"]["header"], keep_template_value=True)
     apply(ws.cell(hr, t_col), roles["total"]["header"], keep_template_value=True)
-    labels = xc.get("header_labels", {})
+    labels = dict({"discount": "DISCOUNT", "discount_price": "DISCOUNT PRICE"}, **xc.get("header_labels", {}))
     for role, col in list(layout["fixed_cols"].items()) + [("quantity", q_col), ("total", t_col)]:
         if labels.get(role):
             ws.cell(hr, col).value = labels[role]
@@ -874,7 +1023,8 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
     first_size_letter = get_column_letter(size_col[sizes[0]])
     last_size_letter = get_column_letter(size_col[sizes[-1]])
     q_letter, t_letter = get_column_letter(q_col), get_column_letter(t_col)
-    price_letter = get_column_letter(layout["fixed_cols"]["unit_price"])
+    # Bestellsumme mit Discount-Preis, wenn vorhanden
+    price_letter = get_column_letter(layout["fixed_cols"]["discount_price" if show_discount else "unit_price"])
 
     hints = xc.get("order_hints") if xc.get("order_hints", {}).get("enabled") else None
     first_article_row = None
@@ -893,10 +1043,16 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         ws.row_dimensions[bottom].height = layout["row_heights"]["bottom"]
 
         values = {"image": None, "sku": art["sku"], "name": art["name"],
-                  "unit_price": float(art["unit_price"]), "uvp": float(art["uvp"])}
+                  "unit_price": float(art["unit_price"]), "uvp": float(art["uvp"]),
+                  "discount": float(art["discount"]) if art.get("discount") else None,
+                  "discount_price": float(art["discount_price"]) if "discount_price" in art else None}
         for role, col in layout["fixed_cols"].items():
             apply(ws.cell(top, col), roles[role]["top"], values[role])
             apply(ws.cell(bottom, col), roles[role]["bottom"])
+        if show_discount:
+            ws.cell(top, layout["fixed_cols"]["discount"]).number_format = "0%"
+            dp = ws.cell(top, layout["fixed_cols"]["discount_price"])
+            dp.font = Font(name=dp.font.name, size=dp.font.sz, bold=True, color=DARK)
         for s, col in size_col.items():
             qty = art["stock"].get(s)
             if qty == 0 and not cfg["rules"]["show_zero_stock"]:
@@ -973,7 +1129,8 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
         rule.formula = [rule.formula[0].replace("{r}", str(r_first)).replace("{p}", str(r_first - 1))]
         ws.conditional_formatting.add(rng, rule)
     if hints and first_article_row:
-        write_legend(ws, 1, size_col[sizes[0]], t_col, widths, hints,
+        # Legende direkt nach dem Titel (ab der Spalte hinter "Name"), damit sie auch bei wenigen Größen passt
+        write_legend(ws, 1, layout["fixed_cols"]["name"] + 1, t_col, widths, hints,
                      roles["size"]["top"], roles["size"]["bottom"])
     if cfg["rules"]["grand_total_row"] and cfg["rules"]["order_formulas"]:
         ws.row_dimensions[row].height = layout["row_heights"]["bottom"]
@@ -982,14 +1139,12 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand):
               f"=SUM({q_letter}{r_first}:{q_letter}{last_row})")
         apply(ws.cell(row, t_col), roles["total"]["bottom"],
               f"=SUM({t_letter}{r_first}:{t_letter}{last_row})")
+        for col in (q_col - 1, q_col, t_col):
+            # Gesamtsumme ist ein Ergebnis, kein Eingabefeld: weiß und fett statt orange
+            ws.cell(row, col).fill = PatternFill("solid", fgColor="FFFFFFFF")
+            ws.cell(row, col).font = Font(name="Arial", size=11, bold=True, color=DARK)
 
     ws.freeze_panes = ws.cell(r_first, n_fixed + 1).coordinate
-    if cfg["rules"].get("hide_unused_sizes"):
-        used = {s for a in articles for s in a["stock"]}
-        for s, col in size_col.items():
-            if s not in used:
-                ws.column_dimensions[get_column_letter(col)].hidden = True
-
     if cfg["rules"]["landscape_print"]:
         ws.page_setup.paperSize = ws.PAPERSIZE_A4
         ws.page_setup.orientation = "landscape"
@@ -1039,6 +1194,9 @@ def main():
     parser.add_argument("--no-archive", action="store_true",
                         help="CSV nach Erfolg nicht nach input/archiv verschieben")
     parser.add_argument("--shop", help="Marke/Shop aus config/shopify.env (bei mehreren Shops)")
+    parser.add_argument("--markup", help="EK-Preis = UVP ÷ Markup, wenn die CSV keinen EK-Preis hat (z.B. 2,5)")
+    parser.add_argument("--sort", choices=[k for k, _ in SORT_CHOICES],
+                        help="bestseller = Bestseller & Kategorien, stock = nach Bestand (sonst Abfrage)")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -1047,24 +1205,33 @@ def main():
     try:
         shop = select_shop(load_shops(cfg), args.shop)
         brand = shop["name"] if shop else cfg["excel"]["default_brand"]
+        sort_label = select_sort(args.sort, cfg)
+        apply_brand_groups(cfg, brand)
         print(f"Marke:    {brand}" + (f" ({shop['shop']})" if shop else ""))
+        print(f"Sortierung: {sort_label}")
         csv_path = find_input_csv(cfg, args.csv)
         print(f"CSV:      {csv_path.name}")
         raw, enc = read_csv(csv_path, cfg)
         header_idx, positions, col_info = detect_columns(raw, cfg, brand, warnings)
         print(f"Encoding: {enc}, {len(raw) - header_idx - 1} Datenzeilen" + (f" (Kopfzeile in Zeile {header_idx + 1})" if header_idx else ""))
         print("Spalten:  " + "\n          ".join(col_info))
+        markup = None
+        if "unit_price" not in positions:
+            markup = ask_markup(args.markup)
+            print(f"EK-Preis: UVP ÷ {str(markup).replace('.', ',')} (Markup)")
+        elif args.markup:
+            warnings.append("--markup ignoriert: die CSV hat einen EK-Preis.")
 
         template_path = BASE_DIR / cfg["paths"]["template"]
         if not template_path.is_file():
             raise StocklistError(f"Template nicht gefunden: {template_path}")
         template_sizes = read_template_layout(load_workbook(template_path).worksheets[0], cfg)["sizes"]
 
-        articles = build_articles(raw, positions, cfg, template_sizes, warnings, header_idx)
+        articles = build_articles(raw, positions, cfg, template_sizes, warnings, header_idx, brand, markup)
         enrich_from_shopify(articles, cfg, warnings, shop)
         sort_articles(articles, cfg, warnings)
         out = output_path(cfg, today, brand)
-        sizes = write_workbook(template_path, out, articles, cfg, today, brand)
+        sizes = write_workbook(template_path, out, articles, cfg, today, brand, "discount" in positions)
     except (StocklistError, OSError) as e:
         print("\nFEHLER – es wurde KEINE Stockliste erstellt.\n")
         print(e)
