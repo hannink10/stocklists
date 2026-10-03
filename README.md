@@ -137,6 +137,9 @@ Alles steht in `config/mapping.json`:
   - je Marke unter `brands` → `<Marke>` → `product_groups`: `sku_prefixes` (SKU-Anfang → Gruppe, vor den Stichwörtern;
     **Reternity**: SKU beginnt mit `40` = Shoes), zusätzliche `rules` (z.B. Flowers-Schuhmodelle `SEED`, `OFFSHOOT`, …)
     und eine eigene `order`.
+    `priority_rules` (Stichwörter vor den allgemeinen Regeln) und `sets`: **Reternity** hat die Kategorie **Suits** ganz oben –
+    SIGNE BLAZER und TAILORED BAGGY PANTS gleicher Farbe stehen als Set untereinander (`SUIT SET · PINSTRIPE BLUE`);
+    Set-Artikel bleiben in ihrer Kategorie und wandern nicht in den Bestseller-Block.
     Artikel ohne passendes Stichwort werden beim Start abgefragt (`ask_unknown`); die Antwort steht danach in
     `config/category_overrides.json` und hat Vorrang vor allen Regeln. Dort kann man sie auch ändern oder löschen.
     Ohne Abfragefenster landen sie unter `Other` und werden als `Hinweis:` gemeldet.

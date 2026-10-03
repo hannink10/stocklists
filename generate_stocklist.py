@@ -178,6 +178,10 @@ def apply_brand_groups(cfg, brand):
         gcfg["order"] = list(bg["order"])
     if bg.get("sku_prefixes"):
         gcfg["sku_prefixes"] = list(bg["sku_prefixes"])
+    if bg.get("priority_rules"):
+        gcfg["priority_rules"] = list(bg["priority_rules"])
+    if bg.get("sets"):
+        gcfg["sets"] = dict(bg["sets"])
 
 
 def split_sku(sku, rule, known_sizes):
@@ -547,6 +551,9 @@ def product_group(name, gcfg, sku=None):
         if sku and str(sku).upper().startswith(str(prefix).upper()):
             return group
     text = " " + normalize_name(model_name(name)) + " "
+    for keyword, group in gcfg.get("priority_rules", []):  # Markenregeln vor den allgemeinen (z.B. Suits vor Pants)
+        if " " + normalize_name(keyword) + " " in text:
+            return group
     for keyword, group in gcfg["rules"]:
         if " " + normalize_name(keyword) + " " in text:
             return group
@@ -573,7 +580,10 @@ def sort_articles(articles, cfg, warnings):
 
     top = []
     if mode == "bestseller" and gcfg.get("bestseller_top"):
-        top = [a for a in articles if a["sold"] > 0][: gcfg["bestseller_top"]]
+        # Artikel aus Set-Kategorien (z.B. Suits) bleiben in ihrer Kategorie, damit Sets vollständig sind
+        in_sets = set(gcfg.get("sets", {}))
+        top = [a for a in articles if a["sold"] > 0
+               and product_group(a["name"], gcfg, a["sku"]) not in in_sets][: gcfg["bestseller_top"]]
     for art in top:
         art["section"] = gcfg["bestseller_title"]
     top_ids = {id(a) for a in top}
@@ -601,7 +611,41 @@ def sort_articles(articles, cfg, warnings):
             + ", ".join(f"{a['sku']} ({a['name']})" for a in other)
             + " – beim nächsten Start im Fenster zuordnen oder Stichwort in mapping.json ergänzen."
         )
+    arrange_sets(rest, gcfg)
     articles[:] = top + rest
+
+
+def arrange_sets(rest, gcfg):
+    """Kategorien mit Sets (mapping.json → brands → product_groups → sets): Teile derselben Farbe
+    (Text nach dem letzten ' - ', z.B. 'PINSTRIPE BLUE') direkt untereinander, in der Reihenfolge der 'parts'.
+    Sets nach Verkäufen, dann Bestand sortiert. Setzt art['set_label'] für die Zwischenzeile."""
+    for group, scfg in gcfg.get("sets", {}).items():
+        members = [a for a in rest if a["section"] == group]
+        if not members:
+            continue
+        parts = [normalize_name(p) for p in scfg.get("parts", [])]
+
+        def part_index(art):
+            text = " " + normalize_name(model_name(art["name"])) + " "
+            return next((i for i, p in enumerate(parts) if " " + p + " " in text), len(parts))
+
+        def color(art):
+            return art["name"].rsplit(" - ", 1)[1].strip() if " - " in art["name"] else ""
+
+        sets = OrderedDict()
+        for art in members:
+            sets.setdefault(normalize_name(color(art)), []).append(art)
+        ordered = sorted(sets.values(), key=lambda arts: (-sum(a["sold"] for a in arts),
+                                                          -sum(sum(a["stock"].values()) for a in arts)))
+        new = []
+        for arts in ordered:
+            arts.sort(key=part_index)
+            label = scfg.get("label", "SET") + (f" · {color(arts[0]).upper()}" if color(arts[0]) else "")
+            for art in arts:
+                art["set_label"] = label if len(arts) > 1 else None
+            new += arts
+        start = rest.index(members[0])
+        rest[start:start + len(members)] = new
 
 
 def ask_unknown_groups(other, gcfg):
@@ -948,6 +992,7 @@ def nav_layout(sections, widths, first_col, last_col):
 
 
 DARK = "FF2F2F2F"
+JUMP_ROWS = 40  # Sprungziel = Bereich ab Zielzeile über so viele Zeilen -> Ziel erscheint am oberen Bildschirmrand
 GREY_TEXT = "FF7F7F7F"
 BAR_FILL = PatternFill("solid", fgColor="FFF5F5F5")
 THIN = Side(style="thin", color="FFBFBFBF")
@@ -967,7 +1012,9 @@ def write_nav_links(ws, top_row, nav_rows, section_rows):
         row = top_row + i
         for title, text, start, end in links:
             c = ws.cell(row, start, text)
-            c.hyperlink = Hyperlink(ref=c.coordinate, location=f"'{ws.title}'!A{section_rows[title]}", display=text)
+            # Ziel ist ein Bereich, der höher als der Bildschirm ist: Excel scrollt dann so, dass er oben beginnt
+            r0 = section_rows[title]
+            c.hyperlink = Hyperlink(ref=c.coordinate, location=f"'{ws.title}'!A{r0}:A{r0 + JUMP_ROWS}", display=text)
             c.font = Font(name="Arial", size=10, bold=True, underline="single", color=DARK)
             c.alignment = Alignment(horizontal="center", vertical="center")
             if end > start:
@@ -1020,7 +1067,7 @@ def write_search(ws, row, scfg, fixed_cols, helper_col, first_row, last_row):
     res = ws.cell(row, res_col)
     res.value = (
         f'=IF({q}="","{scfg["empty_hint"]}",IF({h_ref}="-","{scfg["not_found"]}",'
-        f'HYPERLINK("#\'{ws.title}\'!A"&{h_ref},"{scfg["jump"]} "&INDEX(${sku_l}:${sku_l},{h_ref}))))'
+        f'HYPERLINK("#\'{ws.title}\'!A"&{h_ref}&":A"&({h_ref}+{JUMP_ROWS}),"{scfg["jump"]} "&INDEX(${sku_l}:${sku_l},{h_ref}))))'
     )
     res.font = Font(name="Arial", size=10, bold=True, underline="single", color="FF1F4E79")
     res.alignment = Alignment(horizontal="left", vertical="center", indent=1)
@@ -1056,6 +1103,18 @@ def write_legend(ws, row, first_col, last_col, widths, hints, stock_style, order
         if col - 1 > start:
             ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=col - 1)
         col += 1  # Abstand
+
+
+def write_set_row(ws, row, label, last_col):
+    """Kleine Zwischenzeile über einem Set (z.B. 'SUIT SET · PINSTRIPE BLUE')."""
+    c = ws.cell(row, 1, label)
+    c.font = Font(name="Arial", size=10, bold=True, color="FF7F6000")
+    c.alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    fill = PatternFill("solid", fgColor="FFFFF8E1")
+    for col in range(1, last_col + 1):
+        ws.cell(row, col).fill = fill
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=last_col)
+    ws.row_dimensions[row].height = 20
 
 
 def write_section_row(ws, row, title, last_col, n=None):
@@ -1168,6 +1227,7 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
     row = r_first
     section = None
     section_rows = {}
+    current_set = None
     counts = dict(sections)
     for art in articles:
         if art.get("section") and art["section"] != section:
@@ -1175,6 +1235,11 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
             write_section_row(ws, row, section, t_col, counts[section])
             section_rows[section] = row
             row += 1
+            current_set = None
+        if art.get("set_label") and art["set_label"] != current_set:
+            write_set_row(ws, row, art["set_label"], t_col)
+            row += 1
+        current_set = art.get("set_label")
         top, bottom = row, row + 1
         ws.row_dimensions[top].height = layout["row_heights"]["top"]
         ws.row_dimensions[bottom].height = layout["row_heights"]["bottom"]
