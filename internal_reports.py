@@ -51,6 +51,9 @@ def run(mode, args, cfg, shop, brand, today):
         scfg["_excluded"] = excluded
         print(f"Artikel:  {len(articles)} – lade Shopify-Daten (Verkäufe, Retouren, Größen) …")
         coverage = add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings)
+        sales = ask_sales(detect_sales(articles, scfg), args, coverage, today)
+        print("Sales:    " + ("\n          ".join(fmt_sale(s) for s in sales) if sales else "keine früheren Sales berücksichtigt"))
+        apply_sales(articles, sales, coverage, scfg, today)
         recommend(articles, scfg, coverage, today)
         if scfg.get("images", True):
             print("Bilder:   lade Produktbilder aus Shopify …")
@@ -168,7 +171,7 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
 
     per = defaultdict(lambda: {"sold": 0, "returned": 0, "revenue": 0.0, "last": None, "recent": 0, "before": 0, "sold_recent": 0,
                                "sizes": 0, "sizes_stock": 0, "since": None, "on_sale": False, "found": False,
-                               "received": {}})
+                               "received": {}, "lines": [], "returns": []})
     oldest = None
     for line in orders["lines"]:
         b = base_of(line["sku"])
@@ -179,6 +182,7 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
         p["sold"] += line["qty"]
         p["revenue"] += line["paid"]
         p["last"] = line["date"] if p["last"] is None or line["date"] > p["last"] else p["last"]
+        p["lines"].append((line["date"], line["qty"], line["paid"]))
         age = (today - line["date"]).days
         if age < scfg["recent_days"]:
             p["sold_recent"] += line["qty"]
@@ -195,6 +199,10 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
         b = base_of(sku)
         if b:
             per[b]["returned"] += qty
+    for ret in orders.get("returns", []):
+        b = base_of(ret["sku"])
+        if b:
+            per[b]["returns"].append((ret["date"], ret["qty"]))
     for v in variants:
         b = base_of(v["sku"])
         if not b:
@@ -224,6 +232,169 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
     total_sold = sum(a["sold"] for a in articles)
     total_ret = sum(a["returned"] for a in articles)
     return {"days": days, "oldest": oldest, "full_year": full_year, "sold": total_sold, "returned": total_ret}
+
+
+# ---------------------------------------------------------------------------
+# Frühere Sales: erkennen, Verkauf im Sale gegen normal vergleichen
+
+def line_discount(qty, paid, vk):
+    """Rabatt einer Bestellposition gegenüber dem regulären Preis (0…0,95), None ohne Preis/gratis."""
+    if not vk or not qty or paid <= 0:
+        return None
+    return min(0.95, max(0.0, 1 - paid / qty / vk))
+
+
+def detect_sales(articles, scfg):
+    """Sale-Phasen aus den Bestellungen: Tage, an denen im Schnitt deutlich unter dem regulären Preis verkauft
+    wurde (mind. sale_detect_discount), zu Zeiträumen zusammengefasst. Liste von {start, end, discount, units}."""
+    by_day = defaultdict(lambda: [0, 0.0, 0.0])
+    for a in articles:
+        vk = float(a["vk"] or 0)
+        for d, qty, paid in a.get("lines", []):
+            if vk and paid > 0:
+                day = by_day[d]
+                day[0] += qty
+                day[1] += paid
+                day[2] += vk * qty
+    days = sorted(d for d, (n, paid, full) in by_day.items()
+                  if n >= scfg.get("sale_detect_min_units", 10) and 1 - paid / full >= scfg.get("sale_detect_discount", 0.10))
+    sales, gap = [], scfg.get("sale_detect_gap_days", 3)
+    for d in days:
+        if sales and (d - sales[-1]["end"]).days <= gap:
+            sales[-1]["end"] = d
+        else:
+            sales.append({"start": d, "end": d})
+    sales = [s for s in sales if (s["end"] - s["start"]).days + 1 >= scfg.get("sale_detect_min_days", 2)]
+    for s in sales:
+        n, paid, full = (sum(by_day[d][i] for d in by_day if s["start"] <= d <= s["end"]) for i in range(3))
+        s["units"], s["discount"] = n, 1 - paid / full if full else 0
+    return sales
+
+
+def parse_date(text, today):
+    from datetime import datetime
+    text = text.strip().rstrip(".")
+    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            pass
+    try:  # ohne Jahr: letztes Vorkommen vor heute
+        d = datetime.strptime(text, "%d.%m").date().replace(year=today.year)
+        return d if d <= today else d.replace(year=today.year - 1)
+    except ValueError:
+        raise g.StocklistError(f"Datum nicht lesbar: '{text}' (bitte z.B. 27.11.2025)")
+
+
+def parse_sales(text, detected, today):
+    """'1 3' = erkannte Sales Nr. 1 und 3, '27.11.2025-01.12.2025, 01.07.-20.07.' = eigene Zeiträume, '0' = keine."""
+    import re
+    text = text.strip()
+    if not text:
+        return detected
+    if text.lower() in ("0", "kein", "keine", "nein", "n"):
+        return []
+    if re.fullmatch(r"[\d\s,;&und]+", text) and not re.search(r"\d\.", text):
+        picked = []
+        for n in re.findall(r"\d+", text):
+            if not 1 <= int(n) <= len(detected):
+                raise g.StocklistError(f"Sale Nr. {n} gibt es nicht (1–{len(detected)}).")
+            picked.append(detected[int(n) - 1])
+        return picked
+    sales = []
+    for part in re.split(r"[,;]|\bund\b", text):
+        if not part.strip():
+            continue
+        bounds = re.split(r"\s*(?:-|–|bis)\s*", part.strip())
+        if len(bounds) != 2:
+            raise g.StocklistError(f"Zeitraum nicht lesbar: '{part.strip()}' (bitte z.B. 27.11.2025-01.12.2025)")
+        start, end = parse_date(bounds[0], today), parse_date(bounds[1], today)
+        if end < start:
+            start, end = end, start
+        sales.append({"start": start, "end": end})
+    return sales
+
+
+def fmt_sale(s):
+    text = f"{s['start'].strftime('%d.%m.%Y')}–{s['end'].strftime('%d.%m.%Y')} ({(s['end'] - s['start']).days + 1} Tage"
+    if s.get("discount") is not None:
+        text += f", Ø {pct(s['discount'])} Rabatt, {s['units']} Teile"
+    return text + ")"
+
+
+def ask_sales(detected, args, coverage, today):
+    """Welche früheren Sales ausgewertet werden: per --sales oder Abfrage (Enter = alle erkannten)."""
+    import sys
+    text = getattr(args, "sales", None)
+    if text is None:
+        if not sys.stdin.isatty():
+            return detected
+        print("Frühere Sales (aus den Shopify-Bestellungen erkannt):")
+        for i, s in enumerate(detected, 1):
+            print(f"  {i}  {fmt_sale(s)}")
+        if not detected:
+            print("  – keine erkannt –")
+        print("Enter = " + ("alle erkannten" if detected else "ohne") + ", Nummern (z.B. 1 3), eigene Zeiträume "
+              "(z.B. 27.11.2025-01.12.2025) oder 0 = ohne:")
+        text = input("  > ")
+        print()
+    sales = parse_sales(text, detected, today)
+    oldest = coverage.get("oldest")
+    for s in sales:
+        if oldest and s["start"] < oldest:
+            print(f"Hinweis: Sale ab {s['start'].strftime('%d.%m.%Y')} liegt teils vor den Shopify-Daten "
+                  f"(ab {oldest.strftime('%d.%m.%Y')}) – nur der Teil danach zählt.")
+    return sales
+
+
+def apply_sales(articles, sales, coverage, scfg, today):
+    """Je Artikel: verkauft im Sale, geglätteter Rabatt (Median je Teil, auf 5 % gerundet), Uplift = Verkäufe pro
+    Tag im Sale ÷ pro Tag außerhalb von Sales, Retourenquote der Sale-Bestellungen."""
+    scfg["_sales"] = sales
+    if not sales:
+        return
+    in_sale = lambda d: any(s["start"] <= d <= s["end"] for s in sales)
+    oldest = coverage.get("oldest") or today
+    sale_days_all = sum(max(0, (min(s["end"], today) - max(s["start"], oldest)).days + 1) for s in sales)
+    for s in sales:
+        s["units"] = s.get("units") or 0
+    for a in articles:
+        vk = float(a["vk"] or 0)
+        start = max(oldest, a["since"]) if a.get("since") else oldest
+        sale_days = sum(max(0, (min(s["end"], today) - max(s["start"], start)).days + 1) for s in sales)
+        normal_days = max(0, (today - start).days + 1 - sale_days)
+        units, normal, discounts = 0, 0, []
+        for d, qty, paid in a.get("lines", []):
+            if in_sale(d):
+                units += qty
+                disc = line_discount(qty, paid, vk)
+                if disc is not None:
+                    discounts += [disc] * qty
+            else:
+                normal += qty
+        returned = sum(q for d, q in a.get("returns", []) if in_sale(d))
+        a["ls_units"] = units if sale_days else None
+        a["ls_discount"] = None
+        if discounts:
+            discounts.sort()
+            a["ls_discount"] = round(discounts[len(discounts) // 2] * 20) / 20  # Median, auf 5 % geglättet
+        a["ls_return_rate"] = returned / units if units else None
+        a["ls_uplift"] = None
+        if sale_days and normal_days >= 14:
+            sale_rate, normal_rate = units / sale_days, normal / normal_days
+            a["ls_uplift"] = sale_rate / normal_rate if normal_rate else (math.inf if units else None)
+    coverage["sale_days"] = sale_days_all
+    # typischer Uplift je Rabatt (auf 10 % gerundet): Maßstab, ob ein Artikel stark oder schwach auf Rabatt reagiert
+    by_step = defaultdict(list)
+    for a in articles:
+        if a.get("ls_discount") is not None and a.get("ls_uplift") and not math.isinf(a["ls_uplift"]) \
+                and (a["ls_units"] or 0) >= scfg.get("last_sale_min_units", 5):
+            by_step[sale_bucket(a["ls_discount"] * 100)].append(a["ls_uplift"])
+    scfg["_uplift_by_step"] = {k: sorted(v)[len(v) // 2] for k, v in by_step.items() if len(v) >= 5}
+
+
+def sale_bucket(discount):
+    return int(round(discount / 10) * 10)
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +539,19 @@ def recommend(articles, scfg, coverage, today):
         if desired and a["return_rate"] is not None and a["sold"] >= 5 and a["return_rate"] >= scfg["high_return_rate"]:
             desired = step_down(desired)
             reasons.append(f"Retourenquote {pct(a['return_rate'])}")
+        # 6b) Früherer Sale: lief schon mit weniger Rabatt so gut wie andere Artikel erst mit dem höheren Rabatt
+        #     -> nicht mehr geben als nötig (Marge!); reagierte er kaum auf Rabatt -> nur Hinweis
+        typical = scfg.get("_uplift_by_step") or {}
+        if desired and a.get("ls_discount") is not None and a.get("ls_uplift") and (a["ls_units"] or 0) >= scfg.get("last_sale_min_units", 5):
+            up = "viel mehr als sonst" if math.isinf(a["ls_uplift"]) else f"{a['ls_uplift']:.1f}× so viel wie sonst".replace(".", ",")
+            last = a["ls_discount"] * 100
+            need = max(steps[0], next((st for st in steps if st >= last - 1e-9), steps[-1]))
+            if need < desired and sale_bucket(desired) in typical and a["ls_uplift"] >= typical[sale_bucket(desired)]:
+                reasons.append(f"letzter Sale: mit {pct(a['ls_discount'])} schon {up} verkauft – "
+                               f"so viel wie andere erst mit {desired} %")
+                desired = need
+            elif sale_bucket(last) in typical and a["ls_uplift"] < scfg.get("last_sale_weak_factor", 0.5) * typical[sale_bucket(last)]:
+                reasons.append(f"Hinweis: reagierte im letzten Sale schwach auf {pct(a['ls_discount'])} ({up})")
         # 7) Margen-Sperre
         allowed = [s for s in steps if s <= desired and s / 100 <= a["max_disc"] + 1e-9]
         chosen = max(allowed) if allowed else 0
@@ -417,6 +601,8 @@ COLUMNS = [
     # (Titel, Breite, Zahlenformat, Schlüssel)
     ("Rang", 6, None, "rank"), ("Bild", 11, None, "img"), ("SKU", 13, None, "sku"), ("Artikel", 40, None, "name"), ("Kategorie", 12, None, "cat"),
     ("Rabatt (änderbar)", 11, "0%", "disc"), ("Vorschlag", 9, "0%", "suggest"),
+    ("Rabatt letzter Sale", 9, "0%", "ls_disc"), ("Verkauft im Sale", 9, "0", "ls_units"),
+    ("Uplift im Sale", 9, '0.0"×"', "ls_uplift"), ("Retouren im Sale", 9, "0%", "ls_rr"),
     ("Sale-Preis", 11, "#,##0.00 €", "sale"), ("Faktor danach", 9, "0.00", "factor"),
     ("Rohertrag/Stk", 11, "#,##0.00 €", "profit"), ("Rohertrag-Potenzial", 13, "#,##0 €", "potential"),
     ("Umsatz netto bei Abverkauf", 13, "#,##0 €", "revenue"), ("Status", 15, None, "status"),
@@ -444,6 +630,9 @@ def static_values(rank, a, category):
     return {
         "rank": rank, "sku": a["sku"], "name": a["name"], "cat": category,
         "disc": d / 100 if d is not None else None, "suggest": d / 100 if d is not None else None,
+        "ls_disc": a.get("ls_discount"), "ls_units": a.get("ls_units"),
+        "ls_uplift": "neu" if a.get("ls_uplift") is not None and math.isinf(a["ls_uplift"]) else a.get("ls_uplift"),
+        "ls_rr": a.get("ls_return_rate"),
         "stock": a["stock"], "value": float(a["ek"]) * a["stock"], "recent": a.get("recent_net"), "str_recent": a.get("str_recent"),
         "year": a.get("net_sold"), "str": a.get("str"), "rr": a.get("return_rate"),
         "reach": None if a.get("reach") is None or math.isinf(a["reach"]) else round(a["reach"]), "trend": trend,
@@ -630,4 +819,90 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
                   "Mindestmarge, MwSt und Retourenkosten stehen änderbar oben in „Sale-Empfehlung“.", Font(name="Arial", size=9, color="FF7F7F7F")))
     for k, (text, font) in enumerate(notes, r + 2):
         so.cell(k, 1, text).font = font
+    if scfg.get("_sales"):
+        write_sales_section(so, r + 3 + len(notes), articles, scfg, coverage, groups_cfg, today)
+    else:
+        for key in ("ls_disc", "ls_units", "ls_uplift", "ls_rr"):
+            ws.column_dimensions[L[key]].hidden = True
     wb.save(out)
+
+
+def median(values):
+    values = sorted(values)
+    return values[len(values) // 2] if values else None
+
+
+def write_sales_section(so, row, articles, scfg, coverage, groups_cfg, today):
+    """Übersicht: Wie haben frühere Sales gewirkt – je Sale, je Rabatt und je Kategorie."""
+    sales = scfg["_sales"]
+    in_sale = lambda d: any(s["start"] <= d <= s["end"] for s in sales)
+    oldest = coverage.get("oldest") or today
+    window = (today - oldest).days + 1
+    sale_days = coverage.get("sale_days") or 0
+    normal_units = sum(q for a in articles for d, q, _ in a.get("lines", []) if not in_sale(d))
+    normal_rate = normal_units / max(1, window - sale_days)
+
+    def title(text):
+        nonlocal row
+        so.cell(row, 1, text).font = Font(name="Arial", size=12, bold=True, color=DARK)
+        row += 1
+
+    def table(heads, rows, fmts):
+        nonlocal row
+        for i, h in enumerate(heads, 1):
+            header_cell(so.cell(row, i, h))
+        row += 1
+        for values in rows:
+            for i, (v, f) in enumerate(zip(values, fmts), 1):
+                c = so.cell(row, i, v)
+                c.font = Font(name="Arial", size=10)
+                c.number_format = f
+                c.border = Border(bottom=THIN)
+            row += 1
+        row += 1
+
+    so.column_dimensions["A"].width = 24
+    title("FRÜHERE SALES – WIE HAT DER RABATT GEWIRKT?")
+    so.cell(row, 1, f"Uplift = verkaufte Teile pro Tag im Sale ÷ pro Tag außerhalb von Sales (normal Ø {normal_rate:.0f} Teile/Tag). "
+                    "Rabatt im Sale = tatsächlich bezahlt gegenüber regulärem Preis, je Artikel geglättet (Median, 5er-Schritte).").font = \
+        Font(name="Arial", size=9, color="FF7F7F7F")
+    row += 2
+    rows = []
+    for s in sales:
+        days = max(0, (min(s["end"], today) - max(s["start"], oldest)).days + 1)
+        units = sum(q for a in articles for d, q, _ in a.get("lines", []) if s["start"] <= d <= s["end"])
+        paid = sum(p for a in articles for d, q, p in a.get("lines", []) if s["start"] <= d <= s["end"] and a["vk"])
+        full = sum(q * float(a["vk"]) for a in articles for d, q, p in a.get("lines", []) if s["start"] <= d <= s["end"] and a["vk"] and p > 0)
+        rets = sum(q for a in articles for d, q in a.get("returns", []) if s["start"] <= d <= s["end"])
+        rows.append([f"{s['start'].strftime('%d.%m.%Y')}–{s['end'].strftime('%d.%m.%Y')}", days, 1 - paid / full if full else None, units,
+                     (units / days / normal_rate) if days and normal_rate else None, rets / units if units else None])
+    table(["Sale", "Tage", "Ø Rabatt", "Teile verkauft", "Uplift", "Retouren"], rows, ["@", "0", "0%", "#,##0", '0.0"×"', "0%"])
+
+    def group_rows(key_of):
+        groups = defaultdict(list)
+        for a in articles:
+            if a.get("ls_units"):
+                k = key_of(a)
+                if k is not None:
+                    groups[k].append(a)
+        out = []
+        for k in sorted(groups):
+            arts = groups[k]
+            units = sum(a["ls_units"] for a in arts)
+            rets = sum(a["ls_units"] * (a["ls_return_rate"] or 0) for a in arts)
+            ups = [a["ls_uplift"] for a in arts if a.get("ls_uplift") is not None and not math.isinf(a["ls_uplift"])]
+            normal_rr = [a["return_rate"] for a in arts if a.get("return_rate") is not None]
+            out.append([k, len(arts), units, median([a["ls_discount"] for a in arts if a.get("ls_discount") is not None]),
+                        median(ups), rets / units if units else None, median(normal_rr)])
+        return out
+
+    heads = ["", "Artikel", "Teile im Sale", "Ø Rabatt", "Ø Uplift (Median)", "Retouren im Sale", "Retouren 12 Mon. (Median)"]
+    fmts = ["@", "0", "#,##0", "0%", '0.0"×"', "0%", "0%"]
+    title("Je Rabatt im Sale")
+    rows = group_rows(lambda a: None if a.get("ls_discount") is None else round(a["ls_discount"] * 10) / 10)
+    for r_ in rows:
+        r_[0] = f"um {r_[0] * 100:.0f} %"
+    table(["Rabatt"] + heads[1:], rows, fmts)
+    if groups_cfg and groups_cfg.get("rules"):
+        title("Je Kategorie")
+        table(["Kategorie"] + heads[1:], group_rows(lambda a: g.product_group(a["name"], groups_cfg, a["sku"])), fmts)
