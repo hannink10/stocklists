@@ -161,6 +161,8 @@
     "sale": {
       "_note": "Intern → Sale-Empfehlung. Marge = Sale-Preis netto ÷ EK netto. Rabatt nach Abverkauf (verkauft netto ÷ (verkauft netto + Bestand)), angepasst nach Trend, Restgrößen und Retouren, gedeckelt durch die Mindestmarge. Ohne Rabatt bleiben nur Bestseller (oberste Stufe) und Neuheiten.",
       "output_filename": "Intern_Sale_{brand}_{date_iso}.xlsx",
+      "images": true,
+      "image_px": [64, 64],
       "days": 365,
       "full_period_min_days": 300,
       "vat": 0.19,
