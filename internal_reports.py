@@ -155,7 +155,7 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
                 return sku[:n]
         return None
 
-    per = defaultdict(lambda: {"sold": 0, "returned": 0, "revenue": 0.0, "last": None, "recent": 0, "before": 0,
+    per = defaultdict(lambda: {"sold": 0, "returned": 0, "revenue": 0.0, "last": None, "recent": 0, "before": 0, "sold_recent": 0,
                                "sizes": 0, "sizes_stock": 0, "since": None, "on_sale": False, "found": False})
     oldest = None
     for line in orders["lines"]:
@@ -168,6 +168,8 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
         p["revenue"] += line["paid"]
         p["last"] = line["date"] if p["last"] is None or line["date"] > p["last"] else p["last"]
         age = (today - line["date"]).days
+        if age < scfg["recent_days"]:
+            p["sold_recent"] += line["qty"]
         if age < scfg["trend_days"]:
             p["recent"] += line["qty"]
         elif age < 2 * scfg["trend_days"]:
@@ -201,7 +203,7 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
     full_year = days >= scfg["full_period_min_days"]
     if not full_year:
         warnings.append(f"Shopify liefert nur {days} Tage Bestellungen (ältere brauchen das App-Recht read_all_orders) – "
-                        f"es gelten die Grenzen für kurze Zeiträume.")
+                        f"die Korrektur „übers Jahr gefragt“ entfällt.")
     total_sold = sum(a["sold"] for a in articles)
     total_ret = sum(a["returned"] for a in articles)
     return {"days": days, "oldest": oldest, "full_year": full_year, "sold": total_sold, "returned": total_ret}
@@ -211,11 +213,20 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
 # Empfehlung
 
 def recommend(articles, scfg, coverage, today):
-    """Ohne Rabatt bleiben nur Bestseller (oberste Abverkaufsstufe) und Neuheiten; alle anderen bekommen
-    mindestens die kleinste Stufe – sofern die Mindestmarge es zulässt."""
+    """Ohne Rabatt bleiben nur Bestseller (laufen JETZT: Top-Verkäufe der letzten recent_days) und Neuheiten;
+    alle anderen bekommen mindestens die kleinste Stufe. Die Stufe richtet sich nach dem aktuellen Abverkauf,
+    das Jahr korrigiert nur (übers Jahr gefragt -> eine Stufe weniger)."""
     steps = sorted(scfg["steps"])
-    tiers = scfg["tiers_year" if coverage["full_year"] else "tiers_short"]
+    tiers = scfg["tiers_recent"]
     vat = scfg["vat"]
+    # Bestseller = läuft JETZT: Top x % nach verkauften Teilen der letzten recent_days (mind. bestseller_min_units)
+    for a in articles:
+        rr = a["returned"] / a["sold"] if a["sold"] else 0
+        a["recent_net"] = round(a["sold_recent"] * (1 - rr))
+    ranked = sorted((a["recent_net"] for a in articles if a.get("found")), reverse=True)
+    top_n = max(1, int(len(ranked) * scfg["bestseller_top_pct"])) if ranked else 0
+    best_limit = max(scfg["bestseller_min_units"], ranked[top_n - 1] if top_n else 0)
+    scfg["_best_limit"] = best_limit
     weeks = coverage["days"] / 7
 
     def step_up(d, n=1):
@@ -231,6 +242,7 @@ def recommend(articles, scfg, coverage, today):
         a["net_sold"] = max(0, a["sold"] - a["returned"])
         a["return_rate"] = a["returned"] / a["sold"] if a["sold"] else None
         a["str"] = a["net_sold"] / (a["net_sold"] + a["stock"]) if a["net_sold"] + a["stock"] else None
+        a["str_recent"] = a["recent_net"] / (a["recent_net"] + a["stock"]) if a["recent_net"] + a["stock"] else None
         weekly = a["net_sold"] / weeks
         a["reach"] = a["stock"] / weekly if weekly else math.inf
         a["age"] = (today - a["since"]).days if a["since"] else None
@@ -251,27 +263,40 @@ def recommend(articles, scfg, coverage, today):
             finish(a, scfg)
             continue
 
-        # 1) Basis: Abverkaufsquote
-        desired = next(t["discount"] for t in tiers if (a["str"] or 0) >= t["min_str"])
-        reasons.append(f"Abverkauf {pct(a['str'])}")
+        days = scfg["recent_days"]
+        # 1) Bestseller: läuft gerade -> kein Rabatt (außer bei massivem Überbestand)
+        sells_well = a["recent_net"] >= best_limit
+        if sells_well and (a["str_recent"] or 0) >= scfg["bestseller_min_str_recent"]:
+            a["discount"] = 0
+            a["reason"] = f"Bestseller: {a['recent_net']} verkauft in {days} Tagen (Top {scfg['bestseller_top_pct']:.0%}, ab {best_limit})"
+            finish(a, scfg)
+            continue
+        # 2) Basis: Abverkauf der letzten recent_days
+        desired = next(t["discount"] for t in tiers if (a["str_recent"] or 0) >= t["min_str"])
+        reasons.append(f"{a['recent_net']} verkauft in {days} Tagen (Abverkauf {pct(a['str_recent'])})")
         if a["net_sold"] == 0 and a["age"] is not None and a["age"] >= scfg["slow_days"]:
             desired = scfg["slow_discount"]
-            reasons = [f"Ladenhüter: 0 Verkäufe, {a['age']} Tage im Shop"]
-        if not desired:
-            reasons = [f"Bestseller (Abverkauf {pct(a['str'])})"]
-        # 2) Trend: zieht gerade an -> eine Stufe weniger
+            reasons = [f"Ladenhüter: 0 Verkäufe im Jahr, {a['age']} Tage im Shop"]
+        elif sells_well:
+            desired = step_down(desired)
+            reasons.append(f"läuft gut, aber großer Bestand ({a['stock']})")
+        # 3) Übers Jahr gefragt, läuft aber gerade nicht -> eine Stufe weniger (Nachfrage ist grundsätzlich da)
+        elif coverage["full_year"] and (a["str"] or 0) >= scfg["year_popular_str"]:
+            desired = step_down(desired)
+            reasons.append(f"übers Jahr gefragt (Abverkauf 12 Mon. {pct(a['str'])})")
+        # 4) Trend: zieht gerade an -> eine Stufe weniger
         if desired and a["trend"] and a["recent"] >= scfg["trend_min_units"] and a["trend"] >= scfg["trend_up"]:
             desired = step_down(desired)
             reasons.append("Trend steigend")
-        # 3) Restgrößen: nur noch wenige Größen da -> eine Stufe mehr
+        # 5) Restgrößen: nur noch wenige Größen da -> eine Stufe mehr
         if desired and a["sizes"] >= 4 and a["sizes_stock"] <= scfg["broken_sizes_max"]:
             desired = step_up(desired)
             reasons.append(f"nur {a['sizes_stock']} von {a['sizes']} Größen")
-        # 4) Hohe Retourenquote -> nicht tiefer gehen
+        # 6) Hohe Retourenquote -> nicht tiefer gehen
         if desired and a["return_rate"] is not None and a["sold"] >= 5 and a["return_rate"] >= scfg["high_return_rate"]:
             desired = step_down(desired)
             reasons.append(f"Retourenquote {pct(a['return_rate'])}")
-        # 5) Margen-Sperre
+        # 7) Margen-Sperre
         allowed = [s for s in steps if s <= desired and s / 100 <= a["max_disc"] + 1e-9]
         chosen = max(allowed) if allowed else 0
         a["below_margin"] = False
@@ -316,8 +341,8 @@ COLUMNS = [
     ("Rang", 6, None), ("SKU", 13, None), ("Artikel", 40, None), ("Kategorie", 12, None),
     ("Empf. Rabatt", 10, "0%"), ("Sale-Preis", 11, "#,##0.00 €"), ("Faktor danach", 9, "0.00"),
     ("Rohertrag/Stk", 11, "#,##0.00 €"), ("Rohertrag-Potenzial", 13, "#,##0 €"),
-    ("Bestand", 8, "0"), ("Lagerwert EK", 12, "#,##0 €"), ("Verkauft netto", 9, "0"), ("Retouren", 9, "0%"),
-    ("Abverkauf", 9, "0%"), ("Reichweite Wo.", 10, "0"), ("Trend 30 T.", 10, None), ("Letzter Verkauf (Tage)", 10, "0"),
+    ("Bestand", 8, "0"), ("Lagerwert EK", 12, "#,##0 €"), ("Verkauft 60 T.", 9, "0"), ("Abverkauf 60 T.", 9, "0%"),
+    ("Verkauft 12 Mon.", 9, "0"), ("Abverkauf 12 Mon.", 9, "0%"), ("Retouren", 9, "0%"), ("Reichweite Wo.", 10, "0"), ("Trend 30 T.", 10, None), ("Letzter Verkauf (Tage)", 10, "0"),
     ("Ø bezahlt", 10, "#,##0.00 €"), ("Größen verfügbar", 10, None), ("Im Shop seit", 11, "DD.MM.YYYY"),
     ("Max. Rabatt (Marge)", 10, "0%"), ("EK netto", 10, "#,##0.00 €"), ("VK aktuell", 10, "#,##0.00 €"),
     ("Begründung", 60, None),
@@ -332,7 +357,8 @@ def row_values(rank, a, category):
     return [
         rank, a["sku"], a["name"], category,
         d / 100 if d is not None else None, a.get("sale_price"), a.get("factor"), a.get("profit_unit"), a.get("potential"),
-        a["stock"], float(a["ek"]) * a["stock"], a.get("net_sold"), a.get("return_rate"), a.get("str"),
+        a["stock"], float(a["ek"]) * a["stock"], a.get("recent_net"), a.get("str_recent"),
+        a.get("net_sold"), a.get("str"), a.get("return_rate"),
         None if a.get("reach") is None or math.isinf(a["reach"]) else round(a["reach"]), trend, a.get("last_days"),
         a.get("avg_paid"), f"{a['sizes_stock']}/{a['sizes']}" if a.get("sizes") else None, a.get("since"),
         max(0, a["max_disc"]) if a.get("max_disc") is not None else None, float(a["ek"]), float(a["vk"]), a.get("reason"),
@@ -343,7 +369,7 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
     rated = [a for a in articles if a["discount"] is not None]
     unrated = [a for a in articles if a["discount"] is None]
     with_disc = sorted([a for a in rated if a["discount"] > 0], key=lambda a: -a["potential"])
-    without = sorted([a for a in rated if a["discount"] == 0], key=lambda a: -(a["str"] or 0))
+    without = sorted([a for a in rated if a["discount"] == 0], key=lambda a: -(a.get("recent_net") or 0))
     ordered = with_disc + without + unrated
 
     wb = Workbook()
