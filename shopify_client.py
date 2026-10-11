@@ -218,6 +218,33 @@ class ShopifyClient:
                 return variants
             after = data["pageInfo"]["endCursor"]
 
+    def inventory_received_by_month(self, months=12):
+        """Wareneingang je Variante und Monat aus dem Lager-Bericht (ShopifyQL, App-Recht read_reports):
+        {sku: {Monatsanfang (date): Stück}} mit Eingang = Endbestand − Anfangsbestand + verkauft (nur > 0).
+        Eine Abfrage je Monat, weil alle Monate auf einmal zu teuer sind."""
+        query = 'query($q: String!) { shopifyqlQuery(query: $q) { tableData { rows } parseErrors } }'
+        today = date.today()
+        start = date(today.year, today.month, 1)
+        received = {}
+        for _ in range(months):
+            end = min(today, (start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
+            q = ("FROM inventory SHOW starting_inventory_units, ending_inventory_units, inventory_units_sold "
+                 f"GROUP BY product_variant_sku SINCE {start.isoformat()} UNTIL {end.isoformat()} LIMIT 100000")
+            result = self.graphql(query, {"q": q})["shopifyqlQuery"]
+            if result.get("parseErrors"):
+                raise ShopifyError(f"Lager-Bericht nicht lesbar: {result['parseErrors']}")
+            for row in (result.get("tableData") or {}).get("rows") or []:
+                sku = (row.get("product_variant_sku") or "").strip()
+                try:
+                    units = (float(row.get("ending_inventory_units") or 0) - float(row.get("starting_inventory_units") or 0)
+                             + float(row.get("inventory_units_sold") or 0))
+                except ValueError:
+                    continue
+                if sku and units > 0:
+                    received.setdefault(sku, {})[start] = received.get(sku, {}).get(start, 0) + int(round(units))
+            start = (start - timedelta(days=1)).replace(day=1)
+        return received
+
     def order_lines(self, days):
         """Bestellpositionen der letzten `days` Tage (ohne stornierte Bestellungen) und Retouren:
         {"lines": [{sku, qty, paid, date}], "returned": {sku: Stück}}. paid = tatsächlich bezahlt (brutto,

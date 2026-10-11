@@ -66,6 +66,9 @@ def run(mode, args, cfg, shop, brand, today):
     rated = [a for a in articles if a["discount"] is not None]
     on_sale = [a for a in rated if a["discount"] > 0]
     print(f"\nFertig: {out.relative_to(g.BASE_DIR)}")
+    loss = [a for a in rated if a.get("below_ek")]
+    if loss:
+        print(f"  ⛔ {len(loss)} Artikel würden unter EK verkauft (dunkelrot markiert)")
     below = [a for a in rated if a.get("below_margin")]
     if below:
         print(f"  ⚠ {len(below)} Artikel mit {scfg['steps'][0]} % unter der Mindestmarge (rot markiert)")
@@ -137,6 +140,11 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
         variants = client.variant_details()
     except sc.ShopifyError as e:
         raise g.StocklistError(f"Shopify-Daten nicht abrufbar: {e}")
+    try:
+        received = client.inventory_received_by_month(scfg["restock_months"])
+    except sc.ShopifyError as e:
+        received = {}
+        warnings.append(f"Wareneingänge nicht abrufbar (App-Recht read_reports?) – Nachbestellungen werden nicht erkannt: {e}")
 
     bases = {a["sku"] for a in articles}
     rule = g.brand_config(cfg, brand).get("sku_rule") or {"mode": "separator", "separator": cfg["sizes"]["sku_separator"]}
@@ -156,7 +164,8 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
         return None
 
     per = defaultdict(lambda: {"sold": 0, "returned": 0, "revenue": 0.0, "last": None, "recent": 0, "before": 0, "sold_recent": 0,
-                               "sizes": 0, "sizes_stock": 0, "since": None, "on_sale": False, "found": False})
+                               "sizes": 0, "sizes_stock": 0, "since": None, "on_sale": False, "found": False,
+                               "received": {}})
     oldest = None
     for line in orders["lines"]:
         b = base_of(line["sku"])
@@ -174,6 +183,11 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
             p["recent"] += line["qty"]
         elif age < 2 * scfg["trend_days"]:
             p["before"] += line["qty"]
+    for sku, by_month in received.items():
+        b = base_of(sku)
+        if b:
+            for month, units in by_month.items():
+                per[b]["received"][month] = per[b]["received"].get(month, 0) + units
     for sku, qty in orders["returned"].items():
         b = base_of(sku)
         if b:
@@ -249,6 +263,10 @@ def recommend(articles, scfg, coverage, today):
         a["last_days"] = (today - a["last"]).days if a["last"] else None
         a["avg_paid"] = a["revenue"] / a["sold"] if a["sold"] else None
         a["trend"] = (a["recent"] / a["before"]) if a["before"] else (math.inf if a["recent"] else None)
+        restocks = sorted(m for m, u in a.get("received", {}).items() if u >= scfg["restock_min_units"])
+        a["last_restock"] = restocks[-1] if restocks else None
+        a["received_12m"] = sum(a.get("received", {}).values())
+        a["restocked"] = bool(a["last_restock"]) and (today - a["last_restock"]).days <= scfg["restock_protect_days"]
         a["max_disc"] = (1 - scfg["min_margin"] * float(a["ek"]) * (1 + vat) / float(a["vk"])) if a["ek"] and a["vk"] else None
         reasons = []
 
@@ -264,6 +282,17 @@ def recommend(articles, scfg, coverage, today):
             continue
 
         days = scfg["recent_days"]
+        # 0) Restposten (SKU-Reduktion): sehr alt und noch auf Lager -> fester Rabatt, egal wie er sich verkauft;
+        #    liegt die Marge dann unter der Mindestmarge, bleibt der Rabatt – die Zeile wird markiert
+        if (scfg.get("restposten_days") and a["age"] is not None and a["age"] >= scfg["restposten_days"]
+                and a["stock"] > 0 and not a["restocked"]):
+            a["discount"] = scfg["restposten_discount"]
+            a["restposten"] = True
+            a["below_margin"] = a["discount"] / 100 > a["max_disc"] + 1e-9
+            a["reason"] = ((f"⚠ UNTER MINDESTMARGE – Marge erlaubt nur max. {pct(max(0, a['max_disc']))}, " if a["below_margin"] else "")
+                           + f"Restposten: seit {a['since'].strftime('%d.%m.%Y')} im Shop ({a['age']} Tage) – SKU-Reduktion")
+            finish(a, scfg)
+            continue
         # 1) Bestseller: läuft gerade -> kein Rabatt (außer bei massivem Überbestand)
         sells_well = a["recent_net"] >= best_limit
         if sells_well and (a["str_recent"] or 0) >= scfg["bestseller_min_str_recent"]:
@@ -274,7 +303,12 @@ def recommend(articles, scfg, coverage, today):
         # 2) Basis: Abverkauf der letzten recent_days
         desired = next(t["discount"] for t in tiers if (a["str_recent"] or 0) >= t["min_str"])
         reasons.append(f"{a['recent_net']} verkauft in {days} Tagen (Abverkauf {pct(a['str_recent'])})")
-        if a["net_sold"] == 0 and a["age"] is not None and a["age"] >= scfg["slow_days"]:
+        if a["restocked"]:
+            # frisch nachbestellt = Dauerbrenner, kein Ladenhüter -> höchstens die kleinste Stufe
+            desired = min(desired, steps[0])
+            reasons = [f"Dauerbrenner: nachbestellt {a['last_restock'].strftime('%m/%Y')} "
+                       f"(+{a['received'].get(a['last_restock'], 0)}), {a['recent_net']} verkauft in {days} Tagen"]
+        elif a["net_sold"] == 0 and a["age"] is not None and a["age"] >= scfg["slow_days"]:
             desired = scfg["slow_discount"]
             reasons = [f"Ladenhüter: 0 Verkäufe im Jahr, {a['age']} Tage im Shop"]
         elif sells_well:
@@ -289,7 +323,7 @@ def recommend(articles, scfg, coverage, today):
             desired = step_down(desired)
             reasons.append("Trend steigend")
         # 5) Restgrößen: nur noch wenige Größen da -> eine Stufe mehr
-        if desired and a["sizes"] >= 4 and a["sizes_stock"] <= scfg["broken_sizes_max"]:
+        if desired and not a["restocked"] and a["sizes"] >= 4 and a["sizes_stock"] <= scfg["broken_sizes_max"]:
             desired = step_up(desired)
             reasons.append(f"nur {a['sizes_stock']} von {a['sizes']} Größen")
         # 6) Hohe Retourenquote -> nicht tiefer gehen
@@ -324,6 +358,10 @@ def finish(a, scfg):
     rr = a["return_rate"] or 0
     a["profit_unit"] = net - float(a["ek"]) - rr * scfg["return_cost_eur"]
     a["potential"] = a["profit_unit"] * a["stock"]
+    # Verkauf unter Einkaufspreis (nur möglich, wenn ein Rabatt die Mindestmarge bewusst übergeht)
+    a["below_ek"] = bool(d) and a["factor"] is not None and a["factor"] < 1
+    if a["below_ek"] and not (a.get("reason") or "").startswith("⛔"):
+        a["reason"] = f"⛔ UNTER EK – Verlust {abs(net - float(a['ek'])):.2f} € je Teil, " + (a.get("reason") or "")
 
 
 def eur(x):
@@ -344,6 +382,7 @@ COLUMNS = [
     ("Bestand", 8, "0"), ("Lagerwert EK", 12, "#,##0 €"), ("Verkauft 60 T.", 9, "0"), ("Abverkauf 60 T.", 9, "0%"),
     ("Verkauft 12 Mon.", 9, "0"), ("Abverkauf 12 Mon.", 9, "0%"), ("Retouren", 9, "0%"), ("Reichweite Wo.", 10, "0"), ("Trend 30 T.", 10, None), ("Letzter Verkauf (Tage)", 10, "0"),
     ("Ø bezahlt", 10, "#,##0.00 €"), ("Größen verfügbar", 10, None), ("Im Shop seit", 11, "DD.MM.YYYY"),
+    ("Letzter Wareneingang", 11, "MM/YYYY"), ("Eingang 12 Mon.", 9, "0"),
     ("Max. Rabatt (Marge)", 10, "0%"), ("EK netto", 10, "#,##0.00 €"), ("VK aktuell", 10, "#,##0.00 €"),
     ("Begründung", 60, None),
 ]
@@ -361,6 +400,7 @@ def row_values(rank, a, category):
         a.get("net_sold"), a.get("str"), a.get("return_rate"),
         None if a.get("reach") is None or math.isinf(a["reach"]) else round(a["reach"]), trend, a.get("last_days"),
         a.get("avg_paid"), f"{a['sizes_stock']}/{a['sizes']}" if a.get("sizes") else None, a.get("since"),
+        a.get("last_restock"), a.get("received_12m") or None,
         max(0, a["max_disc"]) if a.get("max_disc") is not None else None, float(a["ek"]), float(a["vk"]), a.get("reason"),
     ]
 
@@ -406,7 +446,11 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
         d = a["discount"]
         if d is not None:
             ws.cell(r, 5).fill = PatternFill("solid", fgColor=STEP_COLORS.get(d, "FFF8CBAD"))
-        if a.get("below_margin"):
+        if a.get("below_ek"):
+            for col in range(1, len(COLUMNS) + 1):
+                ws.cell(r, col).fill = PatternFill("solid", fgColor="FFC00000")
+                ws.cell(r, col).font = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
+        elif a.get("below_margin"):
             warn = PatternFill("solid", fgColor="FFFFC7CE")
             for col in range(1, len(COLUMNS) + 1):
                 ws.cell(r, col).fill = warn
@@ -457,11 +501,22 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
         c.number_format = ["@", "0", "#,##0", "#,##0 €", "#,##0 €", "#,##0 €", "0.00"][i - 1]
         c.border = Border(top=Side(style="medium", color=DARK))
     if unrated:
-        so.cell(r + 2, 1, f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Empfehlung“.").font = Font(name="Arial", size=10, color="FF7F7F7F")
+        so.cell(r + 5, 1, f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Empfehlung“.").font = Font(name="Arial", size=10, color="FF7F7F7F")
     below = [a for a in rated if a.get("below_margin")]
     if below:
-        c = so.cell(r + 1, 1, f"⚠ {len(below)} Artikel mit {scfg['steps'][0]} % unter der Mindestmarge – in „Sale-Empfehlung“ rot markiert.")
+        c = so.cell(r + 1, 1, f"⚠ {len(below)} Artikel unter der Mindestmarge – in „Sale-Empfehlung“ rot markiert.")
         c.font = Font(name="Arial", size=10, bold=True, color="FF9C0006")
+    loss = [a for a in rated if a.get("below_ek")]
+    if loss:
+        c = so.cell(r + 6, 1, f"⛔ {len(loss)} Artikel würden UNTER EK verkauft (Bestand {sum(a['stock'] for a in loss)}, "
+                              f"Verlust bei Abverkauf {eur(-sum(a['potential'] for a in loss))}) – dunkelrot markiert.")
+        c.font = Font(name="Arial", size=10, bold=True, color="FFC00000")
+    rest = [a for a in rated if a.get("restposten")]
+    if rest:
+        years = scfg["restposten_days"] / 365
+        c = so.cell(r + 2, 1, f"Restposten (≥ {years:.0f} Jahre im Shop, SKU-Reduktion): {len(rest)} Artikel mit {scfg['restposten_discount']} %, "
+                              f"Bestand {sum(a['stock'] for a in rest)}, Lagerwert EK {eur(sum(float(a['ek']) * a['stock'] for a in rest))}.")
+        c.font = Font(name="Arial", size=10, bold=True, color=DARK)
     if scfg.get("_excluded"):
         so.cell(r + 4, 1, "Ausgeschlossen (Artikelnummer beginnt mit): " + ", ".join(scfg["_excluded"])).font = Font(name="Arial", size=9, color="FF7F7F7F")
     so.cell(r + 3, 1, "Rohertrag = Sale-Preis netto − EK − erwartete Retourenkosten; „bei Abverkauf“ = wenn der ganze Bestand zum Sale-Preis verkauft wird.").font = Font(name="Arial", size=9, color="FF7F7F7F")
