@@ -41,6 +41,14 @@ def run(mode, args, cfg, shop, brand, today):
         g.apply_brand_groups(cfg, brand)
 
         articles = read_articles(raw, header_idx, positions, cfg, warnings)
+        excluded = ask_exclusions(args)
+        if excluded:
+            kept = [a for a in articles if not any(a["sku"].upper().startswith(p.upper()) for p in excluded)]
+            print(f"Ausgeschlossen: {len(articles) - len(kept)} Artikel mit Nummer beginnend mit {', '.join(excluded)}")
+            articles = kept
+            if not articles:
+                raise g.StocklistError("Nach dem Ausschluss sind keine Artikel mehr übrig.")
+        scfg["_excluded"] = excluded
         print(f"Artikel:  {len(articles)} – lade Shopify-Daten (Verkäufe, Retouren, Größen) …")
         coverage = add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings)
         recommend(articles, scfg, coverage, today)
@@ -58,12 +66,29 @@ def run(mode, args, cfg, shop, brand, today):
     rated = [a for a in articles if a["discount"] is not None]
     on_sale = [a for a in rated if a["discount"] > 0]
     print(f"\nFertig: {out.relative_to(g.BASE_DIR)}")
+    below = [a for a in rated if a.get("below_margin")]
+    if below:
+        print(f"  ⚠ {len(below)} Artikel mit {scfg['steps'][0]} % unter der Mindestmarge (rot markiert)")
     print(f"  {len(on_sale)} von {len(articles)} Artikeln mit Rabatt-Empfehlung, "
           f"Rohertrag bei Abverkauf {eur(sum(a['potential'] for a in on_sale))}")
     if not args.no_archive and not args.csv:
         moved = g.archive_csv(csv_path, cfg, today)
         print(f"CSV archiviert: {moved.relative_to(g.BASE_DIR)}")
     return 0
+
+
+def ask_exclusions(args):
+    """Artikelnummer-Anfänge, die nicht berücksichtigt werden (z.B. '100826 & 100726'): per --exclude oder Abfrage."""
+    import re
+    import sys
+    text = getattr(args, "exclude", None)
+    if text is None:
+        if not sys.stdin.isatty():
+            return []
+        print("Artikel ausschließen? Artikelnummer-Anfänge eingeben (z.B. 100826 & 100726), Enter = keine:")
+        text = input("  > ")
+        print()
+    return [t for t in re.findall(r"[A-Za-z0-9][A-Za-z0-9._-]*", text) if t.lower() not in ("und", "and")]
 
 
 # ---------------------------------------------------------------------------
@@ -249,9 +274,14 @@ def recommend(articles, scfg, coverage, today):
         # 5) Margen-Sperre
         allowed = [s for s in steps if s <= desired and s / 100 <= a["max_disc"] + 1e-9]
         chosen = max(allowed) if allowed else 0
+        a["below_margin"] = False
         if chosen < desired:
             limit = f"max. {pct(max(0, a['max_disc']))}"
-            if not chosen:
+            if not chosen and scfg.get("force_min_step", True):
+                # Sale des Jahres: trotzdem die kleinste Stufe, aber deutlich markieren
+                chosen, a["below_margin"] = steps[0], True
+                reasons = [f"⚠ UNTER MINDESTMARGE – Marge erlaubt nur {limit}"] + reasons
+            elif not chosen:
                 reasons = [f"Marge lässt keinen Rabatt zu ({limit})"] + reasons
             else:
                 reasons.append(f"durch Marge {str(scfg['min_margin']).replace('.', ',')} begrenzt ({limit})")
@@ -322,7 +352,9 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
     period = f"{coverage['oldest'].strftime('%d.%m.%Y')}–{today.strftime('%d.%m.%Y')} ({coverage['days']} Tage)" if coverage["oldest"] else "–"
     ws["A1"] = f"SALE-EMPFEHLUNG {brand.upper()} – {today.strftime('%d.%m.%Y')}"
     ws["A1"].font = Font(name="Arial", size=16, bold=True, color=DARK)
+    excluded = scfg.get("_excluded") or []
     ws["A2"] = (f"Shopify-Daten: {period} · Mindestmarge {str(scfg['min_margin']).replace('.', ',')} (VK netto ÷ EK) · "
+                + (f"ausgeschlossen: {', '.join(excluded)}… · " if excluded else "") + 
                 f"Rabattstufen {', '.join(str(s) for s in scfg['steps'])} % · sortiert nach Rohertrag-Potenzial")
     ws["A2"].font = Font(name="Arial", size=10, color="FF7F7F7F")
     hr = 4
@@ -348,7 +380,13 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
         d = a["discount"]
         if d is not None:
             ws.cell(r, 5).fill = PatternFill("solid", fgColor=STEP_COLORS.get(d, "FFF8CBAD"))
-        if a.get("factor") is not None and a["factor"] < scfg["min_margin"] + 0.3:
+        if a.get("below_margin"):
+            warn = PatternFill("solid", fgColor="FFFFC7CE")
+            for col in range(1, len(COLUMNS) + 1):
+                ws.cell(r, col).fill = warn
+            for col in (5, 7, len(COLUMNS)):
+                ws.cell(r, col).font = Font(name="Arial", size=10, bold=True, color="FF9C0006")
+        elif a.get("factor") is not None and a["factor"] < scfg["min_margin"] + 0.3:
             ws.cell(r, 7).font = Font(name="Arial", size=10, bold=True, color="FFC00000")
     ws.freeze_panes = ws.cell(hr + 1, 4)
     ws.auto_filter.ref = f"A{hr}:{get_column_letter(len(COLUMNS))}{hr + len(ordered)}"
@@ -394,5 +432,11 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
         c.border = Border(top=Side(style="medium", color=DARK))
     if unrated:
         so.cell(r + 2, 1, f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Empfehlung“.").font = Font(name="Arial", size=10, color="FF7F7F7F")
+    below = [a for a in rated if a.get("below_margin")]
+    if below:
+        c = so.cell(r + 1, 1, f"⚠ {len(below)} Artikel mit {scfg['steps'][0]} % unter der Mindestmarge – in „Sale-Empfehlung“ rot markiert.")
+        c.font = Font(name="Arial", size=10, bold=True, color="FF9C0006")
+    if scfg.get("_excluded"):
+        so.cell(r + 4, 1, "Ausgeschlossen (Artikelnummer beginnt mit): " + ", ".join(scfg["_excluded"])).font = Font(name="Arial", size=9, color="FF7F7F7F")
     so.cell(r + 3, 1, "Rohertrag = Sale-Preis netto − EK − erwartete Retourenkosten; „bei Abverkauf“ = wenn der ganze Bestand zum Sale-Preis verkauft wird.").font = Font(name="Arial", size=9, color="FF7F7F7F")
     wb.save(out)

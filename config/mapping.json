@@ -166,6 +166,8 @@
       "vat": 0.19,
       "min_margin": 1.5,
       "steps": [20, 30, 40, 50, 70],
+      "force_min_step": true,
+      "_force_note": "true = auch wenn die Marge keinen Rabatt zulässt, gibt es die kleinste Stufe (20 %) – rot markiert. Bestseller und Neuheiten bleiben ohne Rabatt.",
       "_tiers_note": "Erste Zeile, deren min_str erreicht ist, gilt. tiers_year bei 12 Monaten Daten, tiers_short wenn Shopify nur ~60 Tage liefert.",
       "tiers_year": [
         {"min_str": 0.60, "discount": 0}, {"min_str": 0.40, "discount": 20}, {"min_str": 0.25, "discount": 30},

@@ -140,6 +140,11 @@ einen Rabatt aus `steps` (20/30/40/50/70 %):
 4. **Retourenquote** ≥ 35 % → eine Stufe weniger (nie unter die kleinste Stufe).
 5. **Neu im Shop** (< 60 Tage) → kein Rabatt; **Ladenhüter** (0 Verkäufe, ≥ 180 Tage im Shop) → 70 %.
 6. **Margen-Sperre**: Sale-Preis netto ÷ EK nie unter `min_margin` (1,5) – sonst die nächstkleinere Stufe.
+   Lässt die Marge nicht einmal die kleinste Stufe zu, gibt es trotzdem 20 % und die Zeile wird **rot markiert**
+   (`force_min_step: false` = dann kein Rabatt).
+
+Nach dem Einlesen fragt das Script, welche Artikel **ausgeschlossen** werden: Artikelnummer-Anfänge eingeben,
+z.B. `100826 & 100726` – alle Artikel, deren Nummer so beginnt, fallen aus der Auswertung (`--exclude "100826 100726"`).
 
 Ergebnis `output/Intern_Sale_<Marke>_<Datum>.xlsx`: Blatt **Übersicht** (Summen je Rabattstufe: Artikel, Bestand,
 Lagerwert, Umsatz und Rohertrag bei Abverkauf) und Blatt **Sale-Empfehlung** (je Artikel alle Kennzahlen +
