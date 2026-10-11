@@ -157,6 +157,47 @@
     ]
   },
 
+  "internal": {
+    "sale": {
+      "_note": "Intern → Sale-Empfehlung. Marge = Sale-Preis netto ÷ EK netto. Rabatt nach Abverkauf (verkauft netto ÷ (verkauft netto + Bestand)), angepasst nach Reichweite, Trend, Restgrößen und Retouren, gedeckelt durch die Mindestmarge.",
+      "output_filename": "Intern_Sale_{brand}_{date_iso}.xlsx",
+      "days": 365,
+      "full_period_min_days": 300,
+      "vat": 0.19,
+      "min_margin": 1.5,
+      "steps": [20, 30, 40, 50, 70],
+      "_tiers_note": "Erste Zeile, deren min_str erreicht ist, gilt. tiers_year bei 12 Monaten Daten, tiers_short wenn Shopify nur ~60 Tage liefert.",
+      "tiers_year": [
+        {"min_str": 0.60, "discount": 0}, {"min_str": 0.40, "discount": 20}, {"min_str": 0.25, "discount": 30},
+        {"min_str": 0.10, "discount": 40}, {"min_str": 0, "discount": 50}
+      ],
+      "tiers_short": [
+        {"min_str": 0.30, "discount": 0}, {"min_str": 0.15, "discount": 20}, {"min_str": 0.05, "discount": 30},
+        {"min_str": 0.0001, "discount": 40}, {"min_str": 0, "discount": 50}
+      ],
+      "new_days": 60,
+      "slow_days": 180,
+      "slow_discount": 70,
+      "min_reach_weeks": 12,
+      "high_reach_weeks": 52,
+      "trend_days": 30,
+      "trend_up": 1.5,
+      "trend_min_units": 3,
+      "broken_sizes_max": 2,
+      "high_return_rate": 0.35,
+      "return_cost_eur": 0,
+      "_return_cost_note": "Kosten je Retoure (Versand, Handling) in €, wird beim Rohertrag pro Stück abgezogen.",
+      "columns": {
+        "sku":   {"header": "Artikelnummer", "aliases": ["SKU", "Art.-Nr.", "ArtNr", "Item Number"]},
+        "name":  {"header": "Artikelname", "aliases": ["NAME", "Bezeichnung", "Product Name"]},
+        "ek":    {"header": "Durchschnittlicher Einkaufspreis (netto)", "aliases": ["EK", "EK netto", "Einkaufspreis", "Einkaufspreis netto", "Ø EK", "Purchase Price"]},
+        "uvp":   {"header": "UVP", "aliases": ["RRP", "Retail Price"]},
+        "vk":    {"header": "Brutto-VK", "required": false, "aliases": ["VK brutto", "VK", "Verkaufspreis"]},
+        "stock": {"header": "Verfügbar", "aliases": ["AVAILABLE", "Bestand", "Auf Lager", "Lagerbestand", "Stock"]}
+      }
+    }
+  },
+
   "shopify": {
     "enabled": true,
     "api_version": "2025-10",

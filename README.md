@@ -123,6 +123,29 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   werden im Blattnamen gekürzt). Ohne Shop-Angabe gilt `excel.default_brand` aus `mapping.json`.
 - Alle Formate (Schrift, Farben, Rahmen, €-Format, Breiten, Höhen, fixierte Spalten/Zeilen) werden aus der Vorlage übernommen.
 
+## Intern: Sale-Empfehlung
+
+Beim Start zuerst wählen: `1` Stockliste (für Kunden) oder `2` **Intern: Sale-Empfehlung** (`--mode sale`).
+Dafür in `input/` eine Artikel-CSV aus JTL legen (je Artikel: Artikelnummer, Artikelname, Ø EK netto, UVP,
+Brutto-VK, Verfügbar – die Spalten werden wie bei der Stockliste über ihre Namen erkannt, `internal.sale.columns`).
+
+Das Script holt aus Shopify (12 Monate, App-Rechte `read_orders` + `read_all_orders` + `read_products`):
+Verkäufe, Retouren, tatsächlich bezahlte Preise, Lagerbestand je Größe und das Shop-Datum – und empfiehlt je Artikel
+einen Rabatt aus `steps` (20/30/40/50/70 %):
+
+1. **Abverkaufsquote** = verkauft netto (nach Retouren) ÷ (verkauft netto + Bestand) → Stufe aus `tiers_year`
+   (bzw. `tiers_short`, falls Shopify nur ~60 Tage liefert).
+2. **Reichweite** (Bestand ÷ Wochenabsatz) unter 12 Wochen → kein Rabatt; über 52 Wochen → eine Stufe mehr.
+3. **Trend** (letzte 30 Tage vs. 30 davor) stark steigend → eine Stufe weniger.
+4. **Restgrößen** (≤ 2 von ≥ 4 Größen auf Lager) → eine Stufe mehr.
+5. **Retourenquote** ≥ 35 % → eine Stufe weniger.
+6. **Neu im Shop** (< 60 Tage) → kein Rabatt; **Ladenhüter** (0 Verkäufe, ≥ 180 Tage im Shop) → 70 %.
+7. **Margen-Sperre**: Sale-Preis netto ÷ EK nie unter `min_margin` (1,5) – sonst die nächstkleinere Stufe.
+
+Ergebnis `output/Intern_Sale_<Marke>_<Datum>.xlsx`: Blatt **Übersicht** (Summen je Rabattstufe: Artikel, Bestand,
+Lagerwert, Umsatz und Rohertrag bei Abverkauf) und Blatt **Sale-Empfehlung** (je Artikel alle Kennzahlen +
+Begründung, sortiert nach Rohertrag-Potenzial, mit Filter). Alle Grenzen stehen in `mapping.json` → `internal.sale`.
+
 ## Mapping / Regeln ändern
 
 Alles steht in `config/mapping.json`:
