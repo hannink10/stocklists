@@ -52,6 +52,9 @@ def run(mode, args, cfg, shop, brand, today):
         print(f"Artikel:  {len(articles)} – lade Shopify-Daten (Verkäufe, Retouren, Größen) …")
         coverage = add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings)
         recommend(articles, scfg, coverage, today)
+        if scfg.get("images", True):
+            print("Bilder:   lade Produktbilder aus Shopify …")
+            add_images(articles, cfg, shop, scfg, warnings)
         out = g.output_path(cfg, today, brand, scfg["output_filename"])
         write_report(out, articles, scfg, coverage, brand, today, cfg.get("product_groups"))
     except (g.StocklistError, OSError) as e:
@@ -226,6 +229,41 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
 # ---------------------------------------------------------------------------
 # Empfehlung
 
+def add_images(articles, cfg, shop, scfg, warnings):
+    """Produktbild je Artikel (Variante mit gleicher Stamm-SKU, sonst gleicher Produktname). Nie kritisch."""
+    import shopify_client as sc
+
+    try:
+        variants = sc.ShopifyClient(shop, cfg["shopify"]["api_version"]).image_variants()
+    except sc.ShopifyError as e:
+        warnings.append(f"Shopify-Bilder nicht abrufbar: {e}")
+        return
+    bases = {a["sku"] for a in articles}
+    by_base, by_name = defaultdict(list), defaultdict(list)
+    for v in variants:
+        sku = v.get("sku") or ""
+        # Varianten-SKU → Stamm-SKU: längster Anfang, der eine Artikelnummer der CSV ist
+        base = next((sku[:n] for n in range(len(sku), 2, -1) if sku[:n] in bases and len(sku) - n <= 6), None)
+        if base:
+            by_base[base].append(v)
+        by_name[g.normalize_name(v.get("title") or "")].append(v)
+    cache = g.BASE_DIR / cfg["shopify"]["image_cache_dir"]
+    size = tuple(scfg.get("image_px", [64, 64]))
+    missing = []
+    for a in articles:
+        url = g.pick_image(by_base.get(a["sku"]) or by_name.get(g.normalize_name(a["name"])), a["name"])
+        if not url:
+            missing.append(a["sku"])
+            continue
+        try:
+            a["image"] = sc.thumbnail(url, cache, a["sku"], size)
+        except (sc.ShopifyError, OSError):
+            missing.append(a["sku"])
+    if missing:
+        more = f" … (+{len(missing) - 10} weitere)" if len(missing) > 10 else ""
+        warnings.append(f"{len(missing)} Artikel ohne Shopify-Bild: " + ", ".join(missing[:10]) + more)
+
+
 def recommend(articles, scfg, coverage, today):
     """Ohne Rabatt bleiben nur Bestseller (laufen JETZT: Top-Verkäufe der letzten recent_days) und Neuheiten;
     alle anderen bekommen mindestens die kleinste Stufe. Die Stufe richtet sich nach dem aktuellen Abverkauf,
@@ -377,7 +415,7 @@ def pct(x):
 
 COLUMNS = [
     # (Titel, Breite, Zahlenformat, Schlüssel)
-    ("Rang", 6, None, "rank"), ("SKU", 13, None, "sku"), ("Artikel", 40, None, "name"), ("Kategorie", 12, None, "cat"),
+    ("Rang", 6, None, "rank"), ("Bild", 11, None, "img"), ("SKU", 13, None, "sku"), ("Artikel", 40, None, "name"), ("Kategorie", 12, None, "cat"),
     ("Rabatt (änderbar)", 11, "0%", "disc"), ("Vorschlag", 9, "0%", "suggest"),
     ("Sale-Preis", 11, "#,##0.00 €", "sale"), ("Faktor danach", 9, "0.00", "factor"),
     ("Rohertrag/Stk", 11, "#,##0.00 €", "profit"), ("Rohertrag-Potenzial", 13, "#,##0 €", "potential"),
@@ -496,8 +534,11 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
             fmt = COLUMNS[i - 1][2]
             if fmt:
                 c.number_format = fmt
-            if i > 4 and key != "reason":
-                c.alignment = Alignment(horizontal="center")
+            left = key in ("rank", "sku", "name", "cat", "reason")
+            c.alignment = Alignment(horizontal=None if left else "center", vertical="center", wrap_text=key == "name")
+        if a.get("image"):
+            ws.row_dimensions[r].height = 52
+            g.add_image(ws, a["image"], r, COL["img"], 70, 62)
         if a["discount"] is not None:
             ws.cell(r, COL["disc"]).fill = edit_fill
             ws.cell(r, COL["disc"]).border = Border(*(Side(style="thin", color="FFBFBFBF"),) * 4)
@@ -548,7 +589,7 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
         crit = f"{step / 100}"
         vals = [f"{step} %" if step else "kein Rabatt", f"=COUNTIF({rng['disc']},{crit})", f"=SUMIF({rng['disc']},{crit},{rng['stock']})",
                 f"=SUMIF({rng['disc']},{crit},{rng['value']})", f"=SUMIF({rng['disc']},{crit},{rng['revenue']})",
-                f"=SUMIF({rng['disc']},{crit},{rng['potential']})", f'=IF(D{r}=0,"",E{r}/D{r})']
+                f"=SUMIF({rng['disc']},{crit},{rng['potential']})", f'=IF(ABS(D{r})<0.01,"",E{r}/D{r})']
         for i, v in enumerate(vals, 1):
             c = so.cell(r, i, v)
             c.font = Font(name="Arial", size=10)
@@ -559,13 +600,13 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
     # eigene Werte (z.B. 25 %) = alles, was nicht in den Stufen liegt
     other = ["andere %", f"=COUNT({rng['disc']})-SUM(B{top}:B{end})", f"=SUMIF({rng['disc']},\">=0\",{rng['stock']})-SUM(C{top}:C{end})",
              f"=SUMIF({rng['disc']},\">=0\",{rng['value']})-SUM(D{top}:D{end})", f"=SUM({rng['revenue']})-SUM(E{top}:E{end})",
-             f"=SUM({rng['potential']})-SUM(F{top}:F{end})", f'=IF(D{r}=0,"",E{r}/D{r})']
+             f"=SUM({rng['potential']})-SUM(F{top}:F{end})", f'=IF(ABS(D{r})<0.01,"",E{r}/D{r})']
     for i, v in enumerate(other, 1):
         c = so.cell(r, i, v)
         c.font = Font(name="Arial", size=10, italic=True)
         c.number_format = fmts[i - 1]
     r += 1
-    total = ["Gesamt"] + [f"=SUM({col}{top}:{col}{r - 1})" for col in "BCDEF"] + [f'=IF(D{r}=0,"",E{r}/D{r})']
+    total = ["Gesamt"] + [f"=SUM({col}{top}:{col}{r - 1})" for col in "BCDEF"] + [f'=IF(ABS(D{r})<0.01,"",E{r}/D{r})']
     for i, v in enumerate(total, 1):
         c = so.cell(r, i, v)
         c.font = Font(name="Arial", size=10, bold=True)

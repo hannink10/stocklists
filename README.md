@@ -157,6 +157,8 @@ Ergebnis `output/Intern_Sale_<Marke>_<Datum>.xlsx`: Blatt **Übersicht** (Summen
 Lagerwert, Umsatz und Rohertrag bei Abverkauf) und Blatt **Sale-Empfehlung** (je Artikel alle Kennzahlen +
 Begründung, sortiert nach Rohertrag-Potenzial, mit Filter). Alle Grenzen stehen in `mapping.json` → `internal.sale`.
 
+Zu jedem Artikel steht das **Produktbild** aus Shopify in der Spalte „Bild“ (gefunden über die Stamm-SKU, sonst über den Produktnamen; abschaltbar mit `internal.sale.images: false`).
+
 **Zweiter Durchgang – Rabatte selbst anpassen:** In „Sale-Empfehlung“ ist die gelbe Spalte **Rabatt (änderbar)**
 die Eingabe (0–95 %). Sale-Preis, Faktor, Rohertrag, Umsatz, Status (⚠/⛔) und das ganze Blatt **Übersicht**
 sind Excel-Formeln und rechnen sofort neu. „Vorschlag“ bleibt als Original stehen; geänderte Rabatte werden blau
