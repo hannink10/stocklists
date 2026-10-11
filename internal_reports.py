@@ -140,6 +140,11 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
         variants = client.variant_details()
     except sc.ShopifyError as e:
         raise g.StocklistError(f"Shopify-Daten nicht abrufbar: {e}")
+    try:
+        received = client.inventory_received_by_month(scfg["restock_months"])
+    except sc.ShopifyError as e:
+        received = {}
+        warnings.append(f"Wareneingänge nicht abrufbar (App-Recht read_reports?) – Nachbestellungen werden nicht erkannt: {e}")
 
     bases = {a["sku"] for a in articles}
     rule = g.brand_config(cfg, brand).get("sku_rule") or {"mode": "separator", "separator": cfg["sizes"]["sku_separator"]}
@@ -159,7 +164,8 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
         return None
 
     per = defaultdict(lambda: {"sold": 0, "returned": 0, "revenue": 0.0, "last": None, "recent": 0, "before": 0, "sold_recent": 0,
-                               "sizes": 0, "sizes_stock": 0, "since": None, "on_sale": False, "found": False})
+                               "sizes": 0, "sizes_stock": 0, "since": None, "on_sale": False, "found": False,
+                               "received": {}})
     oldest = None
     for line in orders["lines"]:
         b = base_of(line["sku"])
@@ -177,6 +183,11 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
             p["recent"] += line["qty"]
         elif age < 2 * scfg["trend_days"]:
             p["before"] += line["qty"]
+    for sku, by_month in received.items():
+        b = base_of(sku)
+        if b:
+            for month, units in by_month.items():
+                per[b]["received"][month] = per[b]["received"].get(month, 0) + units
     for sku, qty in orders["returned"].items():
         b = base_of(sku)
         if b:
@@ -252,6 +263,10 @@ def recommend(articles, scfg, coverage, today):
         a["last_days"] = (today - a["last"]).days if a["last"] else None
         a["avg_paid"] = a["revenue"] / a["sold"] if a["sold"] else None
         a["trend"] = (a["recent"] / a["before"]) if a["before"] else (math.inf if a["recent"] else None)
+        restocks = sorted(m for m, u in a.get("received", {}).items() if u >= scfg["restock_min_units"])
+        a["last_restock"] = restocks[-1] if restocks else None
+        a["received_12m"] = sum(a.get("received", {}).values())
+        a["restocked"] = bool(a["last_restock"]) and (today - a["last_restock"]).days <= scfg["restock_protect_days"]
         a["max_disc"] = (1 - scfg["min_margin"] * float(a["ek"]) * (1 + vat) / float(a["vk"])) if a["ek"] and a["vk"] else None
         reasons = []
 
@@ -269,7 +284,8 @@ def recommend(articles, scfg, coverage, today):
         days = scfg["recent_days"]
         # 0) Restposten (SKU-Reduktion): sehr alt und noch auf Lager -> fester Rabatt, egal wie er sich verkauft;
         #    liegt die Marge dann unter der Mindestmarge, bleibt der Rabatt – die Zeile wird markiert
-        if scfg.get("restposten_days") and a["age"] is not None and a["age"] >= scfg["restposten_days"] and a["stock"] > 0:
+        if (scfg.get("restposten_days") and a["age"] is not None and a["age"] >= scfg["restposten_days"]
+                and a["stock"] > 0 and not a["restocked"]):
             a["discount"] = scfg["restposten_discount"]
             a["restposten"] = True
             a["below_margin"] = a["discount"] / 100 > a["max_disc"] + 1e-9
@@ -287,7 +303,12 @@ def recommend(articles, scfg, coverage, today):
         # 2) Basis: Abverkauf der letzten recent_days
         desired = next(t["discount"] for t in tiers if (a["str_recent"] or 0) >= t["min_str"])
         reasons.append(f"{a['recent_net']} verkauft in {days} Tagen (Abverkauf {pct(a['str_recent'])})")
-        if a["net_sold"] == 0 and a["age"] is not None and a["age"] >= scfg["slow_days"]:
+        if a["restocked"]:
+            # frisch nachbestellt = Dauerbrenner, kein Ladenhüter -> höchstens die kleinste Stufe
+            desired = min(desired, steps[0])
+            reasons = [f"Dauerbrenner: nachbestellt {a['last_restock'].strftime('%m/%Y')} "
+                       f"(+{a['received'].get(a['last_restock'], 0)}), {a['recent_net']} verkauft in {days} Tagen"]
+        elif a["net_sold"] == 0 and a["age"] is not None and a["age"] >= scfg["slow_days"]:
             desired = scfg["slow_discount"]
             reasons = [f"Ladenhüter: 0 Verkäufe im Jahr, {a['age']} Tage im Shop"]
         elif sells_well:
@@ -302,7 +323,7 @@ def recommend(articles, scfg, coverage, today):
             desired = step_down(desired)
             reasons.append("Trend steigend")
         # 5) Restgrößen: nur noch wenige Größen da -> eine Stufe mehr
-        if desired and a["sizes"] >= 4 and a["sizes_stock"] <= scfg["broken_sizes_max"]:
+        if desired and not a["restocked"] and a["sizes"] >= 4 and a["sizes_stock"] <= scfg["broken_sizes_max"]:
             desired = step_up(desired)
             reasons.append(f"nur {a['sizes_stock']} von {a['sizes']} Größen")
         # 6) Hohe Retourenquote -> nicht tiefer gehen
@@ -361,6 +382,7 @@ COLUMNS = [
     ("Bestand", 8, "0"), ("Lagerwert EK", 12, "#,##0 €"), ("Verkauft 60 T.", 9, "0"), ("Abverkauf 60 T.", 9, "0%"),
     ("Verkauft 12 Mon.", 9, "0"), ("Abverkauf 12 Mon.", 9, "0%"), ("Retouren", 9, "0%"), ("Reichweite Wo.", 10, "0"), ("Trend 30 T.", 10, None), ("Letzter Verkauf (Tage)", 10, "0"),
     ("Ø bezahlt", 10, "#,##0.00 €"), ("Größen verfügbar", 10, None), ("Im Shop seit", 11, "DD.MM.YYYY"),
+    ("Letzter Wareneingang", 11, "MM/YYYY"), ("Eingang 12 Mon.", 9, "0"),
     ("Max. Rabatt (Marge)", 10, "0%"), ("EK netto", 10, "#,##0.00 €"), ("VK aktuell", 10, "#,##0.00 €"),
     ("Begründung", 60, None),
 ]
@@ -378,6 +400,7 @@ def row_values(rank, a, category):
         a.get("net_sold"), a.get("str"), a.get("return_rate"),
         None if a.get("reach") is None or math.isinf(a["reach"]) else round(a["reach"]), trend, a.get("last_days"),
         a.get("avg_paid"), f"{a['sizes_stock']}/{a['sizes']}" if a.get("sizes") else None, a.get("since"),
+        a.get("last_restock"), a.get("received_12m") or None,
         max(0, a["max_disc"]) if a.get("max_disc") is not None else None, float(a["ek"]), float(a["vk"]), a.get("reason"),
     ]
 

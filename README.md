@@ -141,7 +141,9 @@ einen Rabatt aus `steps` (20/30/40/50/70 %):
 2. **Trend** (letzte 30 Tage vs. 30 davor) stark steigend → eine Stufe weniger.
 3. **Restgrößen** (≤ 2 von ≥ 4 Größen auf Lager) → eine Stufe mehr.
 4. **Retourenquote** ≥ 35 % → eine Stufe weniger (nie unter die kleinste Stufe).
-5. **Restposten (SKU-Reduktion)**: mindestens 2 Jahre im Shop (`restposten_days`) und noch Bestand → **70 %**, egal wie
+5. **Dauerbrenner**: in den letzten 180 Tagen nachbestellt (Wareneingang ≥ 10 Teile/Monat laut Shopify-Lager-Bericht,
+   App-Recht `read_reports`) → höchstens **20 %**, nie Restposten oder Ladenhüter (Spalten „Letzter Wareneingang“, „Eingang 12 Mon.“).
+   **Restposten (SKU-Reduktion)**: mindestens 2 Jahre im Shop (`restposten_days`), noch Bestand, nicht nachbestellt → **70 %**, egal wie
    er sich verkauft. Unter der Mindestmarge bleibt es bei 70 % (rot markiert); unter EK zusätzlich **dunkelrot** (⛔).
 5. **Neu im Shop** (< 60 Tage) → kein Rabatt; **Ladenhüter** (0 Verkäufe, ≥ 180 Tage im Shop) → 70 %.
 6. **Margen-Sperre**: Sale-Preis netto ÷ EK nie unter `min_margin` (1,5) – sonst die nächstkleinere Stufe.
