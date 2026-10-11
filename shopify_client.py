@@ -188,6 +188,72 @@ class ShopifyClient:
                 return variants
             after = data["pageInfo"]["endCursor"]
 
+    def variant_details(self):
+        """Alle Varianten: Liste von {sku, price, compare_at, stock, since}.
+        since = Datum, seit dem das Produkt im Shop ist (veröffentlicht, sonst angelegt)."""
+        query = """
+        query($after: String) {
+          productVariants(first: 250, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            nodes { sku price compareAtPrice inventoryQuantity product { createdAt publishedAt } }
+          }
+        }"""
+        variants, after = [], None
+        while True:
+            data = self.graphql(query, {"after": after})["productVariants"]
+            for v in data["nodes"]:
+                sku = (v.get("sku") or "").strip()
+                if not sku:
+                    continue
+                product = v.get("product") or {}
+                stamp = product.get("publishedAt") or product.get("createdAt")
+                variants.append({
+                    "sku": sku,
+                    "price": float(v.get("price") or 0),
+                    "compare_at": float(v["compareAtPrice"]) if v.get("compareAtPrice") else None,
+                    "stock": int(v.get("inventoryQuantity") or 0),
+                    "since": date.fromisoformat(stamp[:10]) if stamp else None,
+                })
+            if not data["pageInfo"]["hasNextPage"]:
+                return variants
+            after = data["pageInfo"]["endCursor"]
+
+    def order_lines(self, days):
+        """Bestellpositionen der letzten `days` Tage (ohne stornierte Bestellungen) und Retouren:
+        {"lines": [{sku, qty, paid, date}], "returned": {sku: Stück}}. paid = tatsächlich bezahlt (brutto,
+        nach Rabatten). Ohne das App-Recht read_all_orders liefert Shopify nur ca. 60 Tage."""
+        since = (date.today() - timedelta(days=days)).isoformat()
+        query = """
+        query($after: String, $q: String) {
+          orders(first: 100, after: $after, query: $q, sortKey: CREATED_AT) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              createdAt
+              lineItems(first: 250) { nodes { sku quantity discountedTotalSet { shopMoney { amount } } } }
+              refunds(first: 20) { refundLineItems(first: 100) { nodes { quantity lineItem { sku } } } }
+            }
+          }
+        }"""
+        lines, returned, after = [], {}, None
+        q = f"created_at:>={since} AND -status:cancelled"
+        while True:
+            data = self.graphql(query, {"after": after, "q": q})["orders"]
+            for order in data["nodes"]:
+                created = date.fromisoformat(order["createdAt"][:10])
+                for li in order["lineItems"]["nodes"]:
+                    sku = (li.get("sku") or "").strip()
+                    if sku and li.get("quantity"):
+                        paid = ((li.get("discountedTotalSet") or {}).get("shopMoney") or {}).get("amount") or 0
+                        lines.append({"sku": sku, "qty": int(li["quantity"]), "paid": float(paid), "date": created})
+                for refund in order.get("refunds") or []:
+                    for rli in refund["refundLineItems"]["nodes"]:
+                        sku = ((rli.get("lineItem") or {}).get("sku") or "").strip()
+                        if sku:
+                            returned[sku] = returned.get(sku, 0) + int(rli.get("quantity") or 0)
+            if not data["pageInfo"]["hasNextPage"]:
+                return {"lines": lines, "returned": returned}
+            after = data["pageInfo"]["endCursor"]
+
     def units_sold_by_sku(self, days):
         """SKU -> verkaufte Stück der letzten `days` Tage (ohne stornierte Bestellungen)."""
         since = (date.today() - timedelta(days=days)).isoformat()

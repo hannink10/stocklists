@@ -216,18 +216,19 @@ def norm_header(text):
 
 
 ROLE_LABELS = {"sku": "SKU", "name": "Name", "uvp": "UVP/RRP", "unit_price": "Händlerpreis", "stock": "Bestand",
-               "discount": "Discount"}
+               "discount": "Discount", "ek": "EK netto", "vk": "VK brutto (aktuell)"}
 
 
 def column_letter_csv(i):
     return get_column_letter(i + 1)
 
 
-def detect_columns(raw, cfg, brand, warnings):
+def detect_columns(raw, cfg, brand, warnings, columns_cfg=None):
     """Findet Kopfzeile und Spalten über ihre Namen (mit Synonymen aus mapping.json, je Marke überschreibbar).
+    columns_cfg: andere Feldliste als cfg["columns"] (z.B. für interne Auswertungen).
     Liefert (Zeilenindex der Kopfzeile, {Feld: Spaltenindex}, Beschreibung für die Ausgabe)."""
-    columns = {k: v for k, v in cfg["columns"].items() if not k.startswith("_")}
-    brand_cols = brand_config(cfg, brand).get("columns", {})
+    columns = {k: v for k, v in (columns_cfg or cfg["columns"]).items() if not k.startswith("_")}
+    brand_cols = brand_config(cfg, brand).get("columns", {}) if columns_cfg is None else {}
 
     def aliases(role):
         spec = dict(columns[role], **brand_cols.get(role, {}))
@@ -705,6 +706,30 @@ def select_shop(shops, wanted):
             print()
             return shops[int(answer) - 1]
         print(f"Bitte eine Zahl von 1 bis {len(shops)} eingeben.")
+
+
+MODE_CHOICES = [
+    ("stocklist", "Stockliste (für Kunden)"),
+    ("sale", "Intern: Sale-Empfehlung (Rabatte nach Abverkauf, Marge geschützt)"),
+]
+
+
+def select_mode(wanted):
+    """Was erstellt werden soll: per --mode, sonst Abfrage im Fenster, ohne Fenster Stockliste."""
+    keys = [k for k, _ in MODE_CHOICES]
+    if wanted:
+        return wanted
+    if not sys.stdin.isatty():
+        return "stocklist"
+    print("Was möchtest du erstellen?")
+    for i, (_, label) in enumerate(MODE_CHOICES, 1):
+        print(f"  {i}  {label}")
+    while True:
+        answer = input("Nummer eingeben und Enter drücken: ").strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(keys):
+            print()
+            return keys[int(answer) - 1]
+        print(f"Bitte eine Zahl von 1 bis {len(keys)} eingeben.")
 
 
 SORT_CHOICES = [
@@ -1364,11 +1389,11 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
     return sizes
 
 
-def output_path(cfg, today, brand):
+def output_path(cfg, today, brand, pattern=None):
     out_dir = BASE_DIR / cfg["paths"]["output_dir"]
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_brand = re.sub(r"[^A-Za-z0-9]+", "-", normalize_name(brand).title()).strip("-")
-    name = cfg["paths"]["output_filename"].format(brand=safe_brand, date_iso=today.isoformat())
+    name = (pattern or cfg["paths"]["output_filename"]).format(brand=safe_brand, date_iso=today.isoformat())
     path = out_dir / name
     version = 2
     while path.exists():
@@ -1398,6 +1423,9 @@ def main():
                         help="CSV nach Erfolg nicht nach input/archiv verschieben")
     parser.add_argument("--shop", help="Marke/Shop aus config/shopify.env (bei mehreren Shops)")
     parser.add_argument("--markup", help="EK-Preis = UVP ÷ Markup, wenn die CSV keinen EK-Preis hat (z.B. 2,5)")
+    parser.add_argument("--mode", choices=[k for k, _ in MODE_CHOICES],
+                        help="stocklist = Stockliste für Kunden, sale = interne Sale-Empfehlung (sonst Abfrage)")
+    parser.add_argument("--exclude", help="Sale-Empfehlung: Artikelnummer-Anfänge ausschließen, z.B. \"100826 100726\"")
     parser.add_argument("--sort", choices=[k for k, _ in SORT_CHOICES],
                         help="bestseller = Bestseller & Kategorien, categories = nur Kategorien, "
                              "stock = nach Bestand (sonst Abfrage)")
@@ -1407,8 +1435,12 @@ def main():
     today = date.today()
     warnings = []
     try:
+        mode = select_mode(args.mode)
         shop = select_shop(load_shops(cfg), args.shop)
         brand = shop["name"] if shop else cfg["excel"]["default_brand"]
+        if mode != "stocklist":
+            import internal_reports
+            return internal_reports.run(mode, args, cfg, shop, brand, today)
         sort_label = select_sort(args.sort, cfg)
         apply_brand_groups(cfg, brand)
         print(f"Marke:    {brand}" + (f" ({shop['shop']})" if shop else ""))

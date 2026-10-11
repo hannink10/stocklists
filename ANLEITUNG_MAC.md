@@ -65,6 +65,7 @@ nicht geteilt – darum muss sich niemand kümmern.
    Dort darf nur **diese eine** CSV liegen.
 2. **Doppelklick auf `Stockliste erstellen.command`.**
    Ein Terminal-Fenster öffnet sich und fragt nacheinander (jeweils Nummer eintippen, Enter):
+   - **Was erstellen**: 1 = Stockliste (für Kunden), 2 = Intern: Sale-Empfehlung (dann eine Artikel-CSV mit EK in `input`)
    - **Marke**
    - **Sortierung**: 1 = Bestseller & Kategorien, 2 = nur Kategorien, 3 = nach Bestand
    - **Markup**, falls die CSV keinen EK-Preis hat (z.B. `2,5`)
