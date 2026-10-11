@@ -135,7 +135,8 @@ einen Rabatt aus `steps` (20/30/40/50/70 %):
 
 1. **Bestseller = läuft jetzt** (kein Rabatt): in den letzten 60 Tagen unter den Top 10 % nach verkauften Teilen
    (mind. 10) **und** dabei mind. 10 % des Bestands abverkauft. Läuft gut, aber riesiger Bestand → Rabatt eine Stufe weniger.
-   Alle anderen: Stufe nach **Abverkauf der letzten 60 Tage** = verkauft netto ÷ (verkauft netto + Bestand), `tiers_recent`.
+   Alle anderen: Stufe nach **Abverkauf der letzten 60 Tage** = verkauft netto ÷ (verkauft netto + Bestand), `tiers_recent`:
+   ab 30 % → 20 %, ab 15 % → 30 %, mind. 1 Teil verkauft → 40 %, 0 verkauft → 50 %.
    War ein Artikel **übers Jahr gefragt** (Abverkauf 12 Monate ≥ 60 %), läuft aber gerade nicht → eine Stufe weniger.
 2. **Trend** (letzte 30 Tage vs. 30 davor) stark steigend → eine Stufe weniger.
 3. **Restgrößen** (≤ 2 von ≥ 4 Größen auf Lager) → eine Stufe mehr.

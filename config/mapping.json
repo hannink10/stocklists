@@ -173,9 +173,9 @@
       "bestseller_min_units": 10,
       "bestseller_min_str_recent": 0.10,
       "_bestseller_note": "Bestseller (kein Rabatt) = gehört nach verkauften Teilen der letzten recent_days zu den Top bestseller_top_pct aller Artikel, mindestens bestseller_min_units Teile, und in der Zeit mindestens bestseller_min_str_recent des Bestands abverkauft (sonst: läuft gut, aber zu viel Bestand -> Rabatt eine Stufe weniger).",
-      "_tiers_note": "Stufe nach Abverkauf der letzten recent_days = verkauft ÷ (verkauft + Bestand); erste Zeile, deren min_str erreicht ist, gilt.",
+      "_tiers_note": "Stufe nach Abverkauf der letzten recent_days = verkauft ÷ (verkauft + Bestand); erste Zeile, deren min_str erreicht ist, gilt. 50 % nur bei 0 Verkäufen in recent_days, ab dem ersten verkauften Teil höchstens 40 %.",
       "tiers_recent": [
-        {"min_str": 0.30, "discount": 20}, {"min_str": 0.15, "discount": 30}, {"min_str": 0.05, "discount": 40}, {"min_str": 0, "discount": 50}
+        {"min_str": 0.30, "discount": 20}, {"min_str": 0.15, "discount": 30}, {"min_str": 0.000001, "discount": 40}, {"min_str": 0, "discount": 50}
       ],
       "year_popular_str": 0.60,
       "_year_note": "Abverkauf übers Jahr mindestens so hoch, läuft aber gerade nicht -> eine Stufe weniger (nie unter die kleinste Stufe).",
