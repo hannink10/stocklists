@@ -710,7 +710,7 @@ def select_shop(shops, wanted):
 
 MODE_CHOICES = [
     ("stocklist", "Stockliste (für Kunden)"),
-    ("sale", "Intern: Sale-Empfehlung (Rabatte nach Abverkauf, Marge geschützt)"),
+    ("sale", "Intern: Sale-Preise festlegen (Rabatte nach Abverkauf, Marge geschützt)"),
 ]
 
 
@@ -1424,9 +1424,9 @@ def main():
     parser.add_argument("--shop", help="Marke/Shop aus config/shopify.env (bei mehreren Shops)")
     parser.add_argument("--markup", help="EK-Preis = UVP ÷ Markup, wenn die CSV keinen EK-Preis hat (z.B. 2,5)")
     parser.add_argument("--mode", choices=[k for k, _ in MODE_CHOICES],
-                        help="stocklist = Stockliste für Kunden, sale = interne Sale-Empfehlung (sonst Abfrage)")
-    parser.add_argument("--sales", help="Sale-Empfehlung: frühere Sales, z.B. \"1 3\" (erkannte Nr.), \"27.11.2025-01.12.2025\" oder 0 = ohne")
-    parser.add_argument("--exclude", help="Sale-Empfehlung: Artikelnummer-Anfänge ausschließen, z.B. \"100826 100726\"")
+                        help="stocklist = Stockliste für Kunden, sale = intern Sale-Preise festlegen (sonst Abfrage)")
+    parser.add_argument("--sales", help="Sale-Preise: frühere Sales, z.B. \"1 3\" (erkannte Nr.), \"27.11.2025-01.12.2025\" oder 0 = ohne")
+    parser.add_argument("--exclude", help="Sale-Preise: Artikelnummer-Anfänge ausschließen, z.B. \"100826 100726\"")
     parser.add_argument("--sort", choices=[k for k, _ in SORT_CHOICES],
                         help="bestseller = Bestseller & Kategorien, categories = nur Kategorien, "
                              "stock = nach Bestand (sonst Abfrage)")
@@ -1468,7 +1468,11 @@ def main():
         enrich_from_shopify(articles, cfg, warnings, shop)
         sort_articles(articles, cfg, warnings)
         out = output_path(cfg, today, brand)
-        sizes = write_workbook(template_path, out, articles, cfg, today, brand, "discount" in positions)
+        # Discount-Spalte nur ausgeben, wenn mindestens ein Artikel einen Rabatt hat (leere Spalte = kein Discount)
+        show_discount = "discount" in positions and any(a.get("discount") for a in articles)
+        if "discount" in positions and not show_discount:
+            warnings.append("Discount-Spalte in der CSV ist leer – Liste ohne DISCOUNT/DISCOUNT PRICE.")
+        sizes = write_workbook(template_path, out, articles, cfg, today, brand, show_discount)
     except (StocklistError, OSError) as e:
         print("\nFEHLER – es wurde KEINE Stockliste erstellt.\n")
         print(e)

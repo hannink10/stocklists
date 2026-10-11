@@ -123,9 +123,9 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   werden im Blattnamen gekürzt). Ohne Shop-Angabe gilt `excel.default_brand` aus `mapping.json`.
 - Alle Formate (Schrift, Farben, Rahmen, €-Format, Breiten, Höhen, fixierte Spalten/Zeilen) werden aus der Vorlage übernommen.
 
-## Intern: Sale-Empfehlung
+## Intern: Sale-Preise festlegen
 
-Beim Start zuerst wählen: `1` Stockliste (für Kunden) oder `2` **Intern: Sale-Empfehlung** (`--mode sale`).
+Beim Start zuerst wählen: `1` Stockliste (für Kunden) oder `2` **Intern: Sale-Preise festlegen** (`--mode sale`).
 Dafür in `input/` eine Artikel-CSV aus JTL legen (je Artikel: Artikelnummer, Artikelname, Ø EK netto, UVP,
 Brutto-VK, Verfügbar – die Spalten werden wie bei der Stockliste über ihre Namen erkannt, `internal.sale.columns`).
 
@@ -154,7 +154,7 @@ Nach dem Einlesen fragt das Script, welche Artikel **ausgeschlossen** werden: Ar
 z.B. `100826 & 100726` – alle Artikel, deren Nummer so beginnt, fallen aus der Auswertung (`--exclude "100826 100726"`).
 
 Ergebnis `output/Intern_Sale_<Marke>_<Datum>.xlsx`: Blatt **Übersicht** (Summen je Rabattstufe: Artikel, Bestand,
-Lagerwert, Umsatz und Rohertrag bei Abverkauf) und Blatt **Sale-Empfehlung** (je Artikel alle Kennzahlen +
+Lagerwert, Umsatz und Rohertrag bei Abverkauf) und Blatt **Sale-Preise** (je Artikel alle Kennzahlen +
 Begründung, sortiert nach Rohertrag-Potenzial, mit Filter). Alle Grenzen stehen in `mapping.json` → `internal.sale`.
 
 Zu jedem Artikel steht das **Produktbild** aus Shopify in der Spalte „Bild“ (gefunden über die Stamm-SKU, sonst über den Produktnamen; abschaltbar mit `internal.sale.images: false`).
@@ -167,7 +167,7 @@ Je Artikel: Rabatt im Sale (bezahlt gegenüber regulärem Preis, Median auf 5 % 
 gut wie ein typischer Artikel mit dem höheren Rabatt, wird der Vorschlag auf den damaligen Rabatt begrenzt (Marge!);
 reagierte er kaum, steht ein Hinweis in der Begründung. Die Übersicht zeigt die Wirkung je Sale, je Rabatt und je Kategorie.
 
-**Zweiter Durchgang – Rabatte selbst anpassen:** In „Sale-Empfehlung“ ist die gelbe Spalte **Rabatt (änderbar)**
+**Zweiter Durchgang – Rabatte selbst anpassen:** In „Sale-Preise“ ist die gelbe Spalte **Rabatt (änderbar)**
 die Eingabe (0–95 %). Sale-Preis, Faktor, Rohertrag, Umsatz, Status (⚠/⛔) und das ganze Blatt **Übersicht**
 sind Excel-Formeln und rechnen sofort neu. „Vorschlag“ bleibt als Original stehen; geänderte Rabatte werden blau
 markiert, eigene Stufen (z. B. 25 %) landen in der Übersicht unter „andere %“. Mindestmarge, MwSt und

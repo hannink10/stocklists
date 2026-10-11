@@ -1,6 +1,6 @@
 """Interne Auswertungen (Menüpunkt "Intern").
 
-Sale-Empfehlung: liest eine Artikel-CSV aus JTL (Artikelnummer, Name, EK netto, UVP/VK, Bestand), holt aus Shopify
+Sale-Preise: liest eine Artikel-CSV aus JTL (Artikelnummer, Name, EK netto, UVP/VK, Bestand), holt aus Shopify
 Verkäufe, Retouren, bezahlte Preise, Lagerbestand je Größe und das Shop-Datum und empfiehlt je Artikel einen Rabatt:
 nach Abverkauf, Reichweite, Trend, Restgrößen und Retouren – aber nie unter die Mindestmarge (VK netto ÷ EK).
 Ergebnis: eine Excel-Datei, sortiert nach Rohertrag-Potenzial.
@@ -29,9 +29,9 @@ def run(mode, args, cfg, shop, brand, today):
             raise g.StocklistError(f"Unbekannte Auswertung '{mode}'.")
         scfg = cfg["internal"]["sale"]
         print(f"Marke:    {brand}" + (f" ({shop['shop']})" if shop else ""))
-        print("Auswertung: Sale-Empfehlung")
+        print("Auswertung: Sale-Preise festlegen")
         if not shop:
-            raise g.StocklistError("Für die Sale-Empfehlung werden Shopify-Daten gebraucht (config/shopify.env).")
+            raise g.StocklistError("Für die Sale-Preise werden Shopify-Daten gebraucht (config/shopify.env).")
         csv_path = g.find_input_csv(cfg, args.csv)
         print(f"CSV:      {csv_path.name}")
         raw, enc = g.read_csv(csv_path, cfg)
@@ -618,7 +618,7 @@ COLUMNS = [
 COL = {key: i for i, (_, _, _, key) in enumerate(COLUMNS, 1)}
 L = {key: get_column_letter(i) for key, i in COL.items()}
 
-# Einstellungen oben in "Sale-Empfehlung" (änderbar, Formeln rechnen damit)
+# Einstellungen oben in "Sale-Preise" (änderbar, Formeln rechnen damit)
 P_MARGIN, P_VAT, P_RETURN = "$B$3", "$D$3", "$F$3"
 
 
@@ -677,9 +677,9 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
     wb = Workbook()
     wb.calculation.fullCalcOnLoad = True  # Formeln beim Öffnen berechnen
     ws = wb.active
-    ws.title = "Sale-Empfehlung"
+    ws.title = "Sale-Preise"
     period = f"{coverage['oldest'].strftime('%d.%m.%Y')}–{today.strftime('%d.%m.%Y')} ({coverage['days']} Tage)" if coverage["oldest"] else "–"
-    ws["A1"] = f"SALE-EMPFEHLUNG {brand.upper()} – {today.strftime('%d.%m.%Y')}"
+    ws["A1"] = f"SALE-PREISE {brand.upper()} – {today.strftime('%d.%m.%Y')}"
     ws["A1"].font = Font(name="Arial", size=16, bold=True, color=DARK)
     excluded = scfg.get("_excluded") or []
     ws["H1"] = (f"Shopify-Daten: {period} · " + (f"ausgeschlossen: {', '.join(excluded)}… · " if excluded else "")
@@ -758,18 +758,18 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
     ws.freeze_panes = ws.cell(first, COL["cat"] + 1)
     ws.auto_filter.ref = f"A{hr}:{get_column_letter(len(COLUMNS))}{last}"
 
-    # Übersicht je Rabattstufe – per Formel aus "Sale-Empfehlung"
+    # Übersicht je Rabattstufe – per Formel aus "Sale-Preise"
     so = wb.create_sheet("Übersicht", 0)
     so["A1"] = f"SALE-ÜBERSICHT {brand.upper()} – {today.strftime('%d.%m.%Y')}"
     so["A1"].font = Font(name="Arial", size=16, bold=True, color=DARK)
     so["A2"] = (f"Shopify-Daten: {period} · Retourenquote gesamt "
-                f"{pct(coverage['returned'] / coverage['sold']) if coverage['sold'] else '–'} · rechnet mit den Rabatten aus „Sale-Empfehlung“")
+                f"{pct(coverage['returned'] / coverage['sold']) if coverage['sold'] else '–'} · rechnet mit den Rabatten aus „Sale-Preise“")
     so["A2"].font = Font(name="Arial", size=10, color="FF7F7F7F")
     heads = ["Rabatt", "Artikel", "Bestand", "Lagerwert EK", "Umsatz netto bei Abverkauf", "Rohertrag bei Abverkauf", "Ø Faktor"]
     for i, (h, w) in enumerate(zip(heads, [14, 10, 10, 14, 20, 20, 10]), 1):
         header_cell(so.cell(4, i, h))
         so.column_dimensions[get_column_letter(i)].width = w
-    sheet = "'Sale-Empfehlung'!"
+    sheet = "'Sale-Preise'!"
     rng = {k: f"{sheet}${L[k]}${first}:${L[k]}${max(first, last)}" for k in ("disc", "stock", "value", "revenue", "potential", "status")}
     fmts = ["@", "0", "#,##0", "#,##0 €", "#,##0 €", "#,##0 €", "0.00"]
     steps = [0] + sorted(scfg["steps"])
@@ -812,11 +812,11 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
         notes.append((f"Restposten (≥ {scfg['restposten_days'] / 365:.0f} Jahre im Shop, SKU-Reduktion): {len(rest)} Artikel vorgeschlagen mit "
                       f"{scfg['restposten_discount']} %.", Font(name="Arial", size=10, bold=True, color=DARK)))
     if unrated:
-        notes.append((f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Empfehlung“.", Font(name="Arial", size=10, color="FF7F7F7F")))
+        notes.append((f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Preise“.", Font(name="Arial", size=10, color="FF7F7F7F")))
     if excluded:
         notes.append(("Ausgeschlossen (Artikelnummer beginnt mit): " + ", ".join(excluded), Font(name="Arial", size=9, color="FF7F7F7F")))
     notes.append(("Rohertrag = Sale-Preis netto − EK − Retourenquote × Retourenkosten; „bei Abverkauf“ = der ganze Bestand wird zum Sale-Preis verkauft. "
-                  "Mindestmarge, MwSt und Retourenkosten stehen änderbar oben in „Sale-Empfehlung“.", Font(name="Arial", size=9, color="FF7F7F7F")))
+                  "Mindestmarge, MwSt und Retourenkosten stehen änderbar oben in „Sale-Preise“.", Font(name="Arial", size=9, color="FF7F7F7F")))
     for k, (text, font) in enumerate(notes, r + 2):
         so.cell(k, 1, text).font = font
     if scfg.get("_sales"):
