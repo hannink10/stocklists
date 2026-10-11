@@ -376,36 +376,71 @@ def pct(x):
 # Excel
 
 COLUMNS = [
-    ("Rang", 6, None), ("SKU", 13, None), ("Artikel", 40, None), ("Kategorie", 12, None),
-    ("Empf. Rabatt", 10, "0%"), ("Sale-Preis", 11, "#,##0.00 €"), ("Faktor danach", 9, "0.00"),
-    ("Rohertrag/Stk", 11, "#,##0.00 €"), ("Rohertrag-Potenzial", 13, "#,##0 €"),
-    ("Bestand", 8, "0"), ("Lagerwert EK", 12, "#,##0 €"), ("Verkauft 60 T.", 9, "0"), ("Abverkauf 60 T.", 9, "0%"),
-    ("Verkauft 12 Mon.", 9, "0"), ("Abverkauf 12 Mon.", 9, "0%"), ("Retouren", 9, "0%"), ("Reichweite Wo.", 10, "0"), ("Trend 30 T.", 10, None), ("Letzter Verkauf (Tage)", 10, "0"),
-    ("Ø bezahlt", 10, "#,##0.00 €"), ("Größen verfügbar", 10, None), ("Im Shop seit", 11, "DD.MM.YYYY"),
-    ("Letzter Wareneingang", 11, "MM/YYYY"), ("Eingang 12 Mon.", 9, "0"),
-    ("Max. Rabatt (Marge)", 10, "0%"), ("EK netto", 10, "#,##0.00 €"), ("VK aktuell", 10, "#,##0.00 €"),
-    ("Begründung", 60, None),
+    # (Titel, Breite, Zahlenformat, Schlüssel)
+    ("Rang", 6, None, "rank"), ("SKU", 13, None, "sku"), ("Artikel", 40, None, "name"), ("Kategorie", 12, None, "cat"),
+    ("Rabatt (änderbar)", 11, "0%", "disc"), ("Vorschlag", 9, "0%", "suggest"),
+    ("Sale-Preis", 11, "#,##0.00 €", "sale"), ("Faktor danach", 9, "0.00", "factor"),
+    ("Rohertrag/Stk", 11, "#,##0.00 €", "profit"), ("Rohertrag-Potenzial", 13, "#,##0 €", "potential"),
+    ("Umsatz netto bei Abverkauf", 13, "#,##0 €", "revenue"), ("Status", 15, None, "status"),
+    ("Bestand", 8, "0", "stock"), ("Lagerwert EK", 12, "#,##0 €", "value"),
+    ("Verkauft 60 T.", 9, "0", "recent"), ("Abverkauf 60 T.", 9, "0%", "str_recent"),
+    ("Verkauft 12 Mon.", 9, "0", "year"), ("Abverkauf 12 Mon.", 9, "0%", "str"), ("Retouren", 9, "0%", "rr"),
+    ("Reichweite Wo.", 10, "0", "reach"), ("Trend 30 T.", 10, None, "trend"), ("Letzter Verkauf (Tage)", 10, "0", "last"),
+    ("Ø bezahlt", 10, "#,##0.00 €", "paid"), ("Größen verfügbar", 10, None, "sizes"), ("Im Shop seit", 11, "DD.MM.YYYY", "since"),
+    ("Letzter Wareneingang", 11, "MM/YYYY", "restock"), ("Eingang 12 Mon.", 9, "0", "received"),
+    ("Max. Rabatt (Marge)", 10, "0%", "maxdisc"), ("EK netto", 10, "#,##0.00 €", "ek"), ("VK aktuell", 10, "#,##0.00 €", "vk"),
+    ("Begründung", 60, None, "reason"),
 ]
+COL = {key: i for i, (_, _, _, key) in enumerate(COLUMNS, 1)}
+L = {key: get_column_letter(i) for key, i in COL.items()}
+
+# Einstellungen oben in "Sale-Empfehlung" (änderbar, Formeln rechnen damit)
+P_MARGIN, P_VAT, P_RETURN = "$B$3", "$D$3", "$F$3"
 
 
-def row_values(rank, a, category):
+def static_values(rank, a, category):
     trend = None
     if a.get("trend") is not None:
         trend = "neu ↑" if math.isinf(a["trend"]) else f"{'↑' if a['trend'] > 1.1 else '↓' if a['trend'] < 0.9 else '→'} {a['recent']} vs {a['before']}"
     d = a.get("discount")
-    return [
-        rank, a["sku"], a["name"], category,
-        d / 100 if d is not None else None, a.get("sale_price"), a.get("factor"), a.get("profit_unit"), a.get("potential"),
-        a["stock"], float(a["ek"]) * a["stock"], a.get("recent_net"), a.get("str_recent"),
-        a.get("net_sold"), a.get("str"), a.get("return_rate"),
-        None if a.get("reach") is None or math.isinf(a["reach"]) else round(a["reach"]), trend, a.get("last_days"),
-        a.get("avg_paid"), f"{a['sizes_stock']}/{a['sizes']}" if a.get("sizes") else None, a.get("since"),
-        a.get("last_restock"), a.get("received_12m") or None,
-        max(0, a["max_disc"]) if a.get("max_disc") is not None else None, float(a["ek"]), float(a["vk"]), a.get("reason"),
-    ]
+    return {
+        "rank": rank, "sku": a["sku"], "name": a["name"], "cat": category,
+        "disc": d / 100 if d is not None else None, "suggest": d / 100 if d is not None else None,
+        "stock": a["stock"], "value": float(a["ek"]) * a["stock"], "recent": a.get("recent_net"), "str_recent": a.get("str_recent"),
+        "year": a.get("net_sold"), "str": a.get("str"), "rr": a.get("return_rate"),
+        "reach": None if a.get("reach") is None or math.isinf(a["reach"]) else round(a["reach"]), "trend": trend,
+        "last": a.get("last_days"), "paid": a.get("avg_paid"),
+        "sizes": f"{a['sizes_stock']}/{a['sizes']}" if a.get("sizes") else None, "since": a.get("since"),
+        "restock": a.get("last_restock"), "received": a.get("received_12m") or None,
+        "ek": float(a["ek"]), "vk": float(a["vk"]), "reason": a.get("reason"),
+    }
+
+
+def row_formulas(r):
+    """Alles, was vom Rabatt abhängt, als Excel-Formel – ändert man den Rabatt, rechnet die Zeile neu."""
+    c = {k: f"${L[k]}{r}" for k in L}
+    return {
+        "sale": f'=IF(OR({c["disc"]}="",{c["vk"]}=0),"",ROUND({c["vk"]}*(1-{c["disc"]}),2))',
+        "factor": f'=IF(OR({c["sale"]}="",{c["ek"]}=0),"",{c["sale"]}/(1+{P_VAT})/{c["ek"]})',
+        "profit": f'=IF({c["sale"]}="","",{c["sale"]}/(1+{P_VAT})-{c["ek"]}-N({c["rr"]})*{P_RETURN})',
+        "potential": f'=IF({c["profit"]}="","",{c["profit"]}*{c["stock"]})',
+        "revenue": f'=IF({c["sale"]}="","",{c["sale"]}/(1+{P_VAT})*{c["stock"]})',
+        "status": (f'=IF(OR({c["disc"]}="",{c["disc"]}=0,{c["factor"]}=""),"",IF({c["factor"]}<1,"⛔ UNTER EK",'
+                   f'IF({c["factor"]}<{P_MARGIN},"⚠ UNTER MARGE","")))'),
+        "maxdisc": f'=IF(OR({c["ek"]}=0,{c["vk"]}=0),"",MAX(0,1-{P_MARGIN}*{c["ek"]}*(1+{P_VAT})/{c["vk"]}))',
+    }
+
+
+def header_cell(c):
+    c.font = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
+    c.fill = PatternFill("solid", fgColor=DARK)
+    c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
 
 def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.worksheet.datavalidation import DataValidation
+
     rated = [a for a in articles if a["discount"] is not None]
     unrated = [a for a in articles if a["discount"] is None]
     with_disc = sorted([a for a in rated if a["discount"] > 0], key=lambda a: -a["potential"])
@@ -413,111 +448,145 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
     ordered = with_disc + without + unrated
 
     wb = Workbook()
+    wb.calculation.fullCalcOnLoad = True  # Formeln beim Öffnen berechnen
     ws = wb.active
     ws.title = "Sale-Empfehlung"
     period = f"{coverage['oldest'].strftime('%d.%m.%Y')}–{today.strftime('%d.%m.%Y')} ({coverage['days']} Tage)" if coverage["oldest"] else "–"
     ws["A1"] = f"SALE-EMPFEHLUNG {brand.upper()} – {today.strftime('%d.%m.%Y')}"
     ws["A1"].font = Font(name="Arial", size=16, bold=True, color=DARK)
     excluded = scfg.get("_excluded") or []
-    ws["A2"] = (f"Shopify-Daten: {period} · Mindestmarge {str(scfg['min_margin']).replace('.', ',')} (VK netto ÷ EK) · "
-                + (f"ausgeschlossen: {', '.join(excluded)}… · " if excluded else "") + 
-                f"Rabattstufen {', '.join(str(s) for s in scfg['steps'])} % · sortiert nach Rohertrag-Potenzial")
-    ws["A2"].font = Font(name="Arial", size=10, color="FF7F7F7F")
+    ws["H1"] = (f"Shopify-Daten: {period} · " + (f"ausgeschlossen: {', '.join(excluded)}… · " if excluded else "")
+                + "Spalte „Rabatt“ ist änderbar – Sale-Preis, Faktor, Rohertrag, Status und Übersicht rechnen mit.")
+    ws["H1"].font = Font(name="Arial", size=10, color="FF7F7F7F")
+
+    # Einstellungen (änderbar)
+    edit_fill = PatternFill("solid", fgColor="FFFFF9C4")
+    for label_col, value_col, label, value, fmt in (("A", "B", "Mindestmarge", scfg["min_margin"], "0.00"),
+                                                    ("C", "D", "MwSt", scfg["vat"], "0%"),
+                                                    ("E", "F", "Retourenkosten €", scfg["return_cost_eur"], "#,##0.00 €")):
+        lc, vc = ws[f"{label_col}3"], ws[f"{value_col}3"]
+        lc.value = label
+        lc.font = Font(name="Arial", size=10, bold=True, color=DARK)
+        lc.alignment = Alignment(horizontal="right")
+        vc.value = value
+        vc.number_format = fmt
+        vc.fill = edit_fill
+        vc.font = Font(name="Arial", size=10, bold=True)
+        vc.border = Border(*(Side(style="thin", color="FF7F7F7F"),) * 4)
+
     hr = 4
-    for i, (title, width, _) in enumerate(COLUMNS, 1):
-        c = ws.cell(hr, i, title)
-        c.font = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
-        c.fill = PatternFill("solid", fgColor=DARK)
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for i, (title, width, _, _) in enumerate(COLUMNS, 1):
+        header_cell(ws.cell(hr, i, title))
         ws.column_dimensions[get_column_letter(i)].width = width
     ws.row_dimensions[hr].height = 32
+    first, last = hr + 1, hr + len(ordered)
 
-    for rank, a in enumerate(ordered, 1):
-        r = hr + rank
+    for idx, a in enumerate(ordered, 1):
+        r = hr + idx
         category = g.product_group(a["name"], groups_cfg, a["sku"]) if groups_cfg and groups_cfg.get("rules") else ""
-        for i, v in enumerate(row_values(rank if a in with_disc else None, a, category), 1):
-            c = ws.cell(r, i, v)
-            c.font = Font(name="Arial", size=10, bold=(COLUMNS[i - 1][0] in ("Empf. Rabatt", "Sale-Preis")))
+        values = static_values(idx if a in with_disc else None, a, category)
+        if a["discount"] is not None:
+            values.update(row_formulas(r))
+        else:
+            values["maxdisc"] = row_formulas(r)["maxdisc"]
+        for key, i in COL.items():
+            c = ws.cell(r, i, values.get(key))
+            c.font = Font(name="Arial", size=10, bold=key in ("disc", "sale", "status"))
             c.border = Border(bottom=THIN)
-            if COLUMNS[i - 1][2]:
-                c.number_format = COLUMNS[i - 1][2]
-            if i > 4 and COLUMNS[i - 1][0] != "Begründung":
+            fmt = COLUMNS[i - 1][2]
+            if fmt:
+                c.number_format = fmt
+            if i > 4 and key != "reason":
                 c.alignment = Alignment(horizontal="center")
-        d = a["discount"]
-        if d is not None:
-            ws.cell(r, 5).fill = PatternFill("solid", fgColor=STEP_COLORS.get(d, "FFF8CBAD"))
-        if a.get("below_ek"):
-            for col in range(1, len(COLUMNS) + 1):
-                ws.cell(r, col).fill = PatternFill("solid", fgColor="FFC00000")
-                ws.cell(r, col).font = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
-        elif a.get("below_margin"):
-            warn = PatternFill("solid", fgColor="FFFFC7CE")
-            for col in range(1, len(COLUMNS) + 1):
-                ws.cell(r, col).fill = warn
-            for col in (5, 7, len(COLUMNS)):
-                ws.cell(r, col).font = Font(name="Arial", size=10, bold=True, color="FF9C0006")
-        elif a.get("factor") is not None and a["factor"] < scfg["min_margin"] + 0.3:
-            ws.cell(r, 7).font = Font(name="Arial", size=10, bold=True, color="FFC00000")
-    ws.freeze_panes = ws.cell(hr + 1, 4)
-    ws.auto_filter.ref = f"A{hr}:{get_column_letter(len(COLUMNS))}{hr + len(ordered)}"
+        if a["discount"] is not None:
+            ws.cell(r, COL["disc"]).fill = edit_fill
+            ws.cell(r, COL["disc"]).border = Border(*(Side(style="thin", color="FFBFBFBF"),) * 4)
 
-    # Übersicht je Rabattstufe
+    if ordered:
+        disc_rng = f"{L['disc']}{first}:{L['disc']}{last}"
+        dv = DataValidation(type="decimal", operator="between", formula1="0", formula2="0.95", allow_blank=True,
+                            showInputMessage=True, promptTitle="Rabatt", prompt="Rabatt eingeben, z.B. 30 % – alles Weitere rechnet neu.",
+                            showErrorMessage=True, errorTitle="Rabatt", error="Bitte einen Rabatt zwischen 0 % und 95 % eingeben.")
+        dv.add(disc_rng)
+        ws.add_data_validation(dv)
+        full = f"A{first}:{get_column_letter(len(COLUMNS))}{last}"
+        d, f = f"${L['disc']}{first}", f"${L['factor']}{first}"
+        # Markierungen als bedingte Formatierung: passen sich an, wenn man den Rabatt ändert
+        ws.conditional_formatting.add(full, FormulaRule(formula=[f'AND(N({d})>0,{f}<>"",{f}<1)'], stopIfTrue=True,
+                                      fill=PatternFill("solid", fgColor="FFC00000", bgColor="FFC00000"),
+                                      font=Font(bold=True, color="FFFFFFFF")))
+        ws.conditional_formatting.add(full, FormulaRule(formula=[f'AND(N({d})>0,{f}<>"",{f}<{P_MARGIN})'], stopIfTrue=True,
+                                      fill=PatternFill("solid", fgColor="FFFFC7CE", bgColor="FFFFC7CE"),
+                                      font=Font(color="FF9C0006")))
+        ws.conditional_formatting.add(disc_rng, FormulaRule(formula=[f'AND({d}<>"",{d}<>${L["suggest"]}{first})'],
+                                      font=Font(bold=True, color="FF1F4E79"),
+                                      fill=PatternFill("solid", fgColor="FFDDEBF7", bgColor="FFDDEBF7")))
+        for step, color in STEP_COLORS.items():
+            ws.conditional_formatting.add(f"{L['suggest']}{first}:{L['suggest']}{last}",
+                                          FormulaRule(formula=[f'${L["suggest"]}{first}={step / 100}'],
+                                                      fill=PatternFill("solid", fgColor=color, bgColor=color)))
+    ws.freeze_panes = ws.cell(first, COL["cat"] + 1)
+    ws.auto_filter.ref = f"A{hr}:{get_column_letter(len(COLUMNS))}{last}"
+
+    # Übersicht je Rabattstufe – per Formel aus "Sale-Empfehlung"
     so = wb.create_sheet("Übersicht", 0)
     so["A1"] = f"SALE-ÜBERSICHT {brand.upper()} – {today.strftime('%d.%m.%Y')}"
     so["A1"].font = Font(name="Arial", size=16, bold=True, color=DARK)
-    so["A2"] = f"Shopify-Daten: {period} · Retourenquote gesamt {pct(coverage['returned'] / coverage['sold']) if coverage['sold'] else '–'}"
+    so["A2"] = (f"Shopify-Daten: {period} · Retourenquote gesamt "
+                f"{pct(coverage['returned'] / coverage['sold']) if coverage['sold'] else '–'} · rechnet mit den Rabatten aus „Sale-Empfehlung“")
     so["A2"].font = Font(name="Arial", size=10, color="FF7F7F7F")
     heads = ["Rabatt", "Artikel", "Bestand", "Lagerwert EK", "Umsatz netto bei Abverkauf", "Rohertrag bei Abverkauf", "Ø Faktor"]
-    widths = [14, 10, 10, 14, 20, 20, 10]
-    for i, (h, w) in enumerate(zip(heads, widths), 1):
-        c = so.cell(4, i, h)
-        c.font = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
-        c.fill = PatternFill("solid", fgColor=DARK)
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for i, (h, w) in enumerate(zip(heads, [14, 10, 10, 14, 20, 20, 10]), 1):
+        header_cell(so.cell(4, i, h))
         so.column_dimensions[get_column_letter(i)].width = w
+    sheet = "'Sale-Empfehlung'!"
+    rng = {k: f"{sheet}${L[k]}${first}:${L[k]}${max(first, last)}" for k in ("disc", "stock", "value", "revenue", "potential", "status")}
+    fmts = ["@", "0", "#,##0", "#,##0 €", "#,##0 €", "#,##0 €", "0.00"]
+    steps = [0] + sorted(scfg["steps"])
     r = 5
-    totals = [0, 0, 0.0, 0.0, 0.0]
-    for step in [0] + sorted(scfg["steps"]):
-        grp = [a for a in rated if a["discount"] == step]
-        if not grp:
-            continue
-        stock = sum(a["stock"] for a in grp)
-        value = sum(float(a["ek"]) * a["stock"] for a in grp)
-        revenue = sum(a["sale_price"] / (1 + scfg["vat"]) * a["stock"] for a in grp)
-        profit = sum(a["potential"] for a in grp)
-        factor = revenue / value if value else None
-        vals = [f"{step} %" if step else "kein Rabatt", len(grp), stock, value, revenue, profit, factor]
+    for step in steps:
+        crit = f"{step / 100}"
+        vals = [f"{step} %" if step else "kein Rabatt", f"=COUNTIF({rng['disc']},{crit})", f"=SUMIF({rng['disc']},{crit},{rng['stock']})",
+                f"=SUMIF({rng['disc']},{crit},{rng['value']})", f"=SUMIF({rng['disc']},{crit},{rng['revenue']})",
+                f"=SUMIF({rng['disc']},{crit},{rng['potential']})", f'=IF(D{r}=0,"",E{r}/D{r})']
         for i, v in enumerate(vals, 1):
             c = so.cell(r, i, v)
             c.font = Font(name="Arial", size=10)
-            c.number_format = ["@", "0", "#,##0", "#,##0 €", "#,##0 €", "#,##0 €", "0.00"][i - 1]
+            c.number_format = fmts[i - 1]
         so.cell(r, 1).fill = PatternFill("solid", fgColor=STEP_COLORS.get(step, "FFF8CBAD"))
-        for k, v in enumerate([len(grp), stock, value, revenue, profit]):
-            totals[k] += v
         r += 1
-    for i, v in enumerate(["Gesamt"] + totals + [totals[3] / totals[2] if totals[2] else None], 1):
+    top, end = 5, r - 1
+    # eigene Werte (z.B. 25 %) = alles, was nicht in den Stufen liegt
+    other = ["andere %", f"=COUNT({rng['disc']})-SUM(B{top}:B{end})", f"=SUMIF({rng['disc']},\">=0\",{rng['stock']})-SUM(C{top}:C{end})",
+             f"=SUMIF({rng['disc']},\">=0\",{rng['value']})-SUM(D{top}:D{end})", f"=SUM({rng['revenue']})-SUM(E{top}:E{end})",
+             f"=SUM({rng['potential']})-SUM(F{top}:F{end})", f'=IF(D{r}=0,"",E{r}/D{r})']
+    for i, v in enumerate(other, 1):
+        c = so.cell(r, i, v)
+        c.font = Font(name="Arial", size=10, italic=True)
+        c.number_format = fmts[i - 1]
+    r += 1
+    total = ["Gesamt"] + [f"=SUM({col}{top}:{col}{r - 1})" for col in "BCDEF"] + [f'=IF(D{r}=0,"",E{r}/D{r})']
+    for i, v in enumerate(total, 1):
         c = so.cell(r, i, v)
         c.font = Font(name="Arial", size=10, bold=True)
-        c.number_format = ["@", "0", "#,##0", "#,##0 €", "#,##0 €", "#,##0 €", "0.00"][i - 1]
+        c.number_format = fmts[i - 1]
         c.border = Border(top=Side(style="medium", color=DARK))
-    if unrated:
-        so.cell(r + 5, 1, f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Empfehlung“.").font = Font(name="Arial", size=10, color="FF7F7F7F")
-    below = [a for a in rated if a.get("below_margin")]
-    if below:
-        c = so.cell(r + 1, 1, f"⚠ {len(below)} Artikel unter der Mindestmarge – in „Sale-Empfehlung“ rot markiert.")
-        c.font = Font(name="Arial", size=10, bold=True, color="FF9C0006")
-    loss = [a for a in rated if a.get("below_ek")]
-    if loss:
-        c = so.cell(r + 6, 1, f"⛔ {len(loss)} Artikel würden UNTER EK verkauft (Bestand {sum(a['stock'] for a in loss)}, "
-                              f"Verlust bei Abverkauf {eur(-sum(a['potential'] for a in loss))}) – dunkelrot markiert.")
-        c.font = Font(name="Arial", size=10, bold=True, color="FFC00000")
+
+    notes = [
+        (f'="⚠ "&COUNTIF({rng["status"]},"⚠*")&" Artikel unter der Mindestmarge (rot markiert)"', Font(name="Arial", size=10, bold=True, color="FF9C0006")),
+        (f'="⛔ "&COUNTIF({rng["status"]},"⛔*")&" Artikel UNTER EK – Verlust bei Abverkauf "&TEXT(-SUMIF({rng["status"]},"⛔*",{rng["potential"]}),"#,##0")&" € (dunkelrot)"',
+         Font(name="Arial", size=10, bold=True, color="FFC00000")),
+    ]
     rest = [a for a in rated if a.get("restposten")]
     if rest:
-        years = scfg["restposten_days"] / 365
-        c = so.cell(r + 2, 1, f"Restposten (≥ {years:.0f} Jahre im Shop, SKU-Reduktion): {len(rest)} Artikel mit {scfg['restposten_discount']} %, "
-                              f"Bestand {sum(a['stock'] for a in rest)}, Lagerwert EK {eur(sum(float(a['ek']) * a['stock'] for a in rest))}.")
-        c.font = Font(name="Arial", size=10, bold=True, color=DARK)
-    if scfg.get("_excluded"):
-        so.cell(r + 4, 1, "Ausgeschlossen (Artikelnummer beginnt mit): " + ", ".join(scfg["_excluded"])).font = Font(name="Arial", size=9, color="FF7F7F7F")
-    so.cell(r + 3, 1, "Rohertrag = Sale-Preis netto − EK − erwartete Retourenkosten; „bei Abverkauf“ = wenn der ganze Bestand zum Sale-Preis verkauft wird.").font = Font(name="Arial", size=9, color="FF7F7F7F")
+        notes.append((f"Restposten (≥ {scfg['restposten_days'] / 365:.0f} Jahre im Shop, SKU-Reduktion): {len(rest)} Artikel vorgeschlagen mit "
+                      f"{scfg['restposten_discount']} %.", Font(name="Arial", size=10, bold=True, color=DARK)))
+    if unrated:
+        notes.append((f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Empfehlung“.", Font(name="Arial", size=10, color="FF7F7F7F")))
+    if excluded:
+        notes.append(("Ausgeschlossen (Artikelnummer beginnt mit): " + ", ".join(excluded), Font(name="Arial", size=9, color="FF7F7F7F")))
+    notes.append(("Rohertrag = Sale-Preis netto − EK − Retourenquote × Retourenkosten; „bei Abverkauf“ = der ganze Bestand wird zum Sale-Preis verkauft. "
+                  "Mindestmarge, MwSt und Retourenkosten stehen änderbar oben in „Sale-Empfehlung“.", Font(name="Arial", size=9, color="FF7F7F7F")))
+    for k, (text, font) in enumerate(notes, r + 2):
+        so.cell(k, 1, text).font = font
     wb.save(out)

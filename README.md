@@ -157,6 +157,12 @@ Ergebnis `output/Intern_Sale_<Marke>_<Datum>.xlsx`: Blatt **Übersicht** (Summen
 Lagerwert, Umsatz und Rohertrag bei Abverkauf) und Blatt **Sale-Empfehlung** (je Artikel alle Kennzahlen +
 Begründung, sortiert nach Rohertrag-Potenzial, mit Filter). Alle Grenzen stehen in `mapping.json` → `internal.sale`.
 
+**Zweiter Durchgang – Rabatte selbst anpassen:** In „Sale-Empfehlung“ ist die gelbe Spalte **Rabatt (änderbar)**
+die Eingabe (0–95 %). Sale-Preis, Faktor, Rohertrag, Umsatz, Status (⚠/⛔) und das ganze Blatt **Übersicht**
+sind Excel-Formeln und rechnen sofort neu. „Vorschlag“ bleibt als Original stehen; geänderte Rabatte werden blau
+markiert, eigene Stufen (z. B. 25 %) landen in der Übersicht unter „andere %“. Mindestmarge, MwSt und
+Retourenkosten stehen änderbar in Zeile 3.
+
 ## Mapping / Regeln ändern
 
 Alles steht in `config/mapping.json`:
