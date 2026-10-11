@@ -168,15 +168,17 @@
       "steps": [20, 30, 40, 50, 70],
       "force_min_step": true,
       "_force_note": "true = auch wenn die Marge keinen Rabatt zulässt, gibt es die kleinste Stufe (20 %) – rot markiert. Bestseller und Neuheiten bleiben ohne Rabatt.",
-      "_tiers_note": "Erste Zeile, deren min_str erreicht ist, gilt. tiers_year bei 12 Monaten Daten, tiers_short wenn Shopify nur ~60 Tage liefert.",
-      "tiers_year": [
-        {"min_str": 0.60, "discount": 0}, {"min_str": 0.40, "discount": 20}, {"min_str": 0.25, "discount": 30},
-        {"min_str": 0.10, "discount": 40}, {"min_str": 0, "discount": 50}
+      "recent_days": 60,
+      "bestseller_top_pct": 0.10,
+      "bestseller_min_units": 10,
+      "bestseller_min_str_recent": 0.10,
+      "_bestseller_note": "Bestseller (kein Rabatt) = gehört nach verkauften Teilen der letzten recent_days zu den Top bestseller_top_pct aller Artikel, mindestens bestseller_min_units Teile, und in der Zeit mindestens bestseller_min_str_recent des Bestands abverkauft (sonst: läuft gut, aber zu viel Bestand -> Rabatt eine Stufe weniger).",
+      "_tiers_note": "Stufe nach Abverkauf der letzten recent_days = verkauft ÷ (verkauft + Bestand); erste Zeile, deren min_str erreicht ist, gilt.",
+      "tiers_recent": [
+        {"min_str": 0.30, "discount": 20}, {"min_str": 0.15, "discount": 30}, {"min_str": 0.05, "discount": 40}, {"min_str": 0, "discount": 50}
       ],
-      "tiers_short": [
-        {"min_str": 0.30, "discount": 0}, {"min_str": 0.15, "discount": 20}, {"min_str": 0.05, "discount": 30},
-        {"min_str": 0.0001, "discount": 40}, {"min_str": 0, "discount": 50}
-      ],
+      "year_popular_str": 0.60,
+      "_year_note": "Abverkauf übers Jahr mindestens so hoch, läuft aber gerade nicht -> eine Stufe weniger (nie unter die kleinste Stufe).",
       "new_days": 60,
       "slow_days": 180,
       "slow_discount": 70,
