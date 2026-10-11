@@ -247,7 +247,8 @@ class ShopifyClient:
 
     def order_lines(self, days):
         """Bestellpositionen der letzten `days` Tage (ohne stornierte Bestellungen) und Retouren:
-        {"lines": [{sku, qty, paid, date}], "returned": {sku: Stück}}. paid = tatsächlich bezahlt (brutto,
+        {"lines": [{sku, qty, paid, date}], "returned": {sku: Stück}, "returns": [{sku, qty, date}]} (date der
+        Retoure = Bestelldatum). paid = tatsächlich bezahlt (brutto,
         nach Rabatten). Ohne das App-Recht read_all_orders liefert Shopify nur ca. 60 Tage."""
         since = (date.today() - timedelta(days=days)).isoformat()
         query = """
@@ -261,7 +262,7 @@ class ShopifyClient:
             }
           }
         }"""
-        lines, returned, after = [], {}, None
+        lines, returned, returns, after = [], {}, [], None
         q = f"created_at:>={since} AND -status:cancelled"
         while True:
             data = self.graphql(query, {"after": after, "q": q})["orders"]
@@ -277,8 +278,9 @@ class ShopifyClient:
                         sku = ((rli.get("lineItem") or {}).get("sku") or "").strip()
                         if sku:
                             returned[sku] = returned.get(sku, 0) + int(rli.get("quantity") or 0)
+                            returns.append({"sku": sku, "qty": int(rli.get("quantity") or 0), "date": created})
             if not data["pageInfo"]["hasNextPage"]:
-                return {"lines": lines, "returned": returned}
+                return {"lines": lines, "returned": returned, "returns": returns}
             after = data["pageInfo"]["endCursor"]
 
     def units_sold_by_sku(self, days):

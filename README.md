@@ -159,6 +159,14 @@ Begründung, sortiert nach Rohertrag-Potenzial, mit Filter). Alle Grenzen stehen
 
 Zu jedem Artikel steht das **Produktbild** aus Shopify in der Spalte „Bild“ (gefunden über die Stamm-SKU, sonst über den Produktnamen; abschaltbar mit `internal.sale.images: false`).
 
+**Frühere Sales:** Das Tool erkennt frühere Sale-Phasen selbst aus den Shopify-Bestellungen (Tage, an denen im Schnitt
+mind. 10 % unter dem regulären Preis verkauft wurde) und zeigt sie im Terminal: Enter = alle erkannten, Nummern
+(z.B. `1 3`), eigene Zeiträume (z.B. `27.11.2025-01.12.2025, 01.07.-20.07.`) oder `0` = ohne (Flag `--sales`).
+Je Artikel: Rabatt im Sale (bezahlt gegenüber regulärem Preis, Median auf 5 % geglättet), verkaufte Teile, Uplift
+(Teile pro Tag im Sale ÷ außerhalb von Sales) und Retourenquote im Sale. Lief ein Artikel schon mit weniger Rabatt so
+gut wie ein typischer Artikel mit dem höheren Rabatt, wird der Vorschlag auf den damaligen Rabatt begrenzt (Marge!);
+reagierte er kaum, steht ein Hinweis in der Begründung. Die Übersicht zeigt die Wirkung je Sale, je Rabatt und je Kategorie.
+
 **Zweiter Durchgang – Rabatte selbst anpassen:** In „Sale-Empfehlung“ ist die gelbe Spalte **Rabatt (änderbar)**
 die Eingabe (0–95 %). Sale-Preis, Faktor, Rohertrag, Umsatz, Status (⚠/⛔) und das ganze Blatt **Übersicht**
 sind Excel-Formeln und rechnen sofort neu. „Vorschlag“ bleibt als Original stehen; geänderte Rabatte werden blau

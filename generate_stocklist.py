@@ -1425,6 +1425,7 @@ def main():
     parser.add_argument("--markup", help="EK-Preis = UVP ÷ Markup, wenn die CSV keinen EK-Preis hat (z.B. 2,5)")
     parser.add_argument("--mode", choices=[k for k, _ in MODE_CHOICES],
                         help="stocklist = Stockliste für Kunden, sale = interne Sale-Empfehlung (sonst Abfrage)")
+    parser.add_argument("--sales", help="Sale-Empfehlung: frühere Sales, z.B. \"1 3\" (erkannte Nr.), \"27.11.2025-01.12.2025\" oder 0 = ohne")
     parser.add_argument("--exclude", help="Sale-Empfehlung: Artikelnummer-Anfänge ausschließen, z.B. \"100826 100726\"")
     parser.add_argument("--sort", choices=[k for k, _ in SORT_CHOICES],
                         help="bestseller = Bestseller & Kategorien, categories = nur Kategorien, "
