@@ -159,7 +159,7 @@
 
   "internal": {
     "sale": {
-      "_note": "Intern → Sale-Empfehlung. Marge = Sale-Preis netto ÷ EK netto. Rabatt nach Abverkauf (verkauft netto ÷ (verkauft netto + Bestand)), angepasst nach Reichweite, Trend, Restgrößen und Retouren, gedeckelt durch die Mindestmarge.",
+      "_note": "Intern → Sale-Empfehlung. Marge = Sale-Preis netto ÷ EK netto. Rabatt nach Abverkauf (verkauft netto ÷ (verkauft netto + Bestand)), angepasst nach Trend, Restgrößen und Retouren, gedeckelt durch die Mindestmarge. Ohne Rabatt bleiben nur Bestseller (oberste Stufe) und Neuheiten.",
       "output_filename": "Intern_Sale_{brand}_{date_iso}.xlsx",
       "days": 365,
       "full_period_min_days": 300,
@@ -178,8 +178,6 @@
       "new_days": 60,
       "slow_days": 180,
       "slow_discount": 70,
-      "min_reach_weeks": 12,
-      "high_reach_weeks": 52,
       "trend_days": 30,
       "trend_up": 1.5,
       "trend_min_units": 3,

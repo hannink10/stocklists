@@ -186,6 +186,8 @@ def add_shopify_data(articles, cfg, shop, brand, scfg, today, warnings):
 # Empfehlung
 
 def recommend(articles, scfg, coverage, today):
+    """Ohne Rabatt bleiben nur Bestseller (oberste Abverkaufsstufe) und Neuheiten; alle anderen bekommen
+    mindestens die kleinste Stufe – sofern die Mindestmarge es zulässt."""
     steps = sorted(scfg["steps"])
     tiers = scfg["tiers_year" if coverage["full_year"] else "tiers_short"]
     vat = scfg["vat"]
@@ -196,8 +198,9 @@ def recommend(articles, scfg, coverage, today):
         return bigger[min(n, len(bigger)) - 1] if bigger else d
 
     def step_down(d):
+        # nie unter die kleinste Stufe: ohne Rabatt bleiben nur Bestseller und Neuheiten
         smaller = [s for s in steps if s < d]
-        return smaller[-1] if smaller else 0
+        return smaller[-1] if smaller else steps[0]
 
     for a in articles:
         a["net_sold"] = max(0, a["sold"] - a["returned"])
@@ -229,30 +232,29 @@ def recommend(articles, scfg, coverage, today):
         if a["net_sold"] == 0 and a["age"] is not None and a["age"] >= scfg["slow_days"]:
             desired = scfg["slow_discount"]
             reasons = [f"Ladenhüter: 0 Verkäufe, {a['age']} Tage im Shop"]
-        # 2) Reichweite: läuft ohnehin bald aus -> kein Rabatt; viel zu viel Ware -> eine Stufe mehr
-        if a["reach"] < scfg["min_reach_weeks"]:
-            desired = 0
-            reasons.append(f"Reichweite nur {a['reach']:.0f} Wochen")
-        elif a["reach"] > scfg["high_reach_weeks"] and 0 < desired < steps[-1]:
-            desired = step_up(desired)
-            reasons.append("Reichweite über 1 Jahr" if math.isinf(a["reach"]) else f"Reichweite {a['reach']:.0f} Wochen")
-        # 3) Trend: zieht gerade an -> eine Stufe weniger
+        if not desired:
+            reasons = [f"Bestseller (Abverkauf {pct(a['str'])})"]
+        # 2) Trend: zieht gerade an -> eine Stufe weniger
         if desired and a["trend"] and a["recent"] >= scfg["trend_min_units"] and a["trend"] >= scfg["trend_up"]:
             desired = step_down(desired)
             reasons.append("Trend steigend")
-        # 4) Restgrößen: nur noch wenige Größen da -> eine Stufe mehr
+        # 3) Restgrößen: nur noch wenige Größen da -> eine Stufe mehr
         if desired and a["sizes"] >= 4 and a["sizes_stock"] <= scfg["broken_sizes_max"]:
             desired = step_up(desired)
             reasons.append(f"nur {a['sizes_stock']} von {a['sizes']} Größen")
-        # 5) Hohe Retourenquote -> nicht tiefer gehen
+        # 4) Hohe Retourenquote -> nicht tiefer gehen
         if desired and a["return_rate"] is not None and a["sold"] >= 5 and a["return_rate"] >= scfg["high_return_rate"]:
             desired = step_down(desired)
             reasons.append(f"Retourenquote {pct(a['return_rate'])}")
-        # 6) Margen-Sperre
+        # 5) Margen-Sperre
         allowed = [s for s in steps if s <= desired and s / 100 <= a["max_disc"] + 1e-9]
         chosen = max(allowed) if allowed else 0
         if chosen < desired:
-            reasons.append(f"durch Marge {str(scfg['min_margin']).replace('.', ',')} begrenzt (max. {pct(max(0, a['max_disc']))})")
+            limit = f"max. {pct(max(0, a['max_disc']))}"
+            if not chosen:
+                reasons = [f"Marge lässt keinen Rabatt zu ({limit})"] + reasons
+            else:
+                reasons.append(f"durch Marge {str(scfg['min_margin']).replace('.', ',')} begrenzt ({limit})")
         a["discount"] = chosen
         a["reason"] = ", ".join(reasons)
         finish(a, scfg)

@@ -134,13 +134,12 @@ Verkäufe, Retouren, tatsächlich bezahlte Preise, Lagerbestand je Größe und d
 einen Rabatt aus `steps` (20/30/40/50/70 %):
 
 1. **Abverkaufsquote** = verkauft netto (nach Retouren) ÷ (verkauft netto + Bestand) → Stufe aus `tiers_year`
-   (bzw. `tiers_short`, falls Shopify nur ~60 Tage liefert).
-2. **Reichweite** (Bestand ÷ Wochenabsatz) unter 12 Wochen → kein Rabatt; über 52 Wochen → eine Stufe mehr.
-3. **Trend** (letzte 30 Tage vs. 30 davor) stark steigend → eine Stufe weniger.
-4. **Restgrößen** (≤ 2 von ≥ 4 Größen auf Lager) → eine Stufe mehr.
-5. **Retourenquote** ≥ 35 % → eine Stufe weniger.
-6. **Neu im Shop** (< 60 Tage) → kein Rabatt; **Ladenhüter** (0 Verkäufe, ≥ 180 Tage im Shop) → 70 %.
-7. **Margen-Sperre**: Sale-Preis netto ÷ EK nie unter `min_margin` (1,5) – sonst die nächstkleinere Stufe.
+   (bzw. `tiers_short`, falls Shopify nur ~60 Tage liefert). Ohne Rabatt bleiben nur **Bestseller** (oberste Stufe) und **Neuheiten**.
+2. **Trend** (letzte 30 Tage vs. 30 davor) stark steigend → eine Stufe weniger.
+3. **Restgrößen** (≤ 2 von ≥ 4 Größen auf Lager) → eine Stufe mehr.
+4. **Retourenquote** ≥ 35 % → eine Stufe weniger (nie unter die kleinste Stufe).
+5. **Neu im Shop** (< 60 Tage) → kein Rabatt; **Ladenhüter** (0 Verkäufe, ≥ 180 Tage im Shop) → 70 %.
+6. **Margen-Sperre**: Sale-Preis netto ÷ EK nie unter `min_margin` (1,5) – sonst die nächstkleinere Stufe.
 
 Ergebnis `output/Intern_Sale_<Marke>_<Datum>.xlsx`: Blatt **Übersicht** (Summen je Rabattstufe: Artikel, Bestand,
 Lagerwert, Umsatz und Rohertrag bei Abverkauf) und Blatt **Sale-Empfehlung** (je Artikel alle Kennzahlen +
