@@ -66,6 +66,9 @@ def run(mode, args, cfg, shop, brand, today):
     rated = [a for a in articles if a["discount"] is not None]
     on_sale = [a for a in rated if a["discount"] > 0]
     print(f"\nFertig: {out.relative_to(g.BASE_DIR)}")
+    loss = [a for a in rated if a.get("below_ek")]
+    if loss:
+        print(f"  ⛔ {len(loss)} Artikel würden unter EK verkauft (dunkelrot markiert)")
     below = [a for a in rated if a.get("below_margin")]
     if below:
         print(f"  ⚠ {len(below)} Artikel mit {scfg['steps'][0]} % unter der Mindestmarge (rot markiert)")
@@ -264,6 +267,16 @@ def recommend(articles, scfg, coverage, today):
             continue
 
         days = scfg["recent_days"]
+        # 0) Restposten (SKU-Reduktion): sehr alt und noch auf Lager -> fester Rabatt, egal wie er sich verkauft;
+        #    liegt die Marge dann unter der Mindestmarge, bleibt der Rabatt – die Zeile wird markiert
+        if scfg.get("restposten_days") and a["age"] is not None and a["age"] >= scfg["restposten_days"] and a["stock"] > 0:
+            a["discount"] = scfg["restposten_discount"]
+            a["restposten"] = True
+            a["below_margin"] = a["discount"] / 100 > a["max_disc"] + 1e-9
+            a["reason"] = ((f"⚠ UNTER MINDESTMARGE – Marge erlaubt nur max. {pct(max(0, a['max_disc']))}, " if a["below_margin"] else "")
+                           + f"Restposten: seit {a['since'].strftime('%d.%m.%Y')} im Shop ({a['age']} Tage) – SKU-Reduktion")
+            finish(a, scfg)
+            continue
         # 1) Bestseller: läuft gerade -> kein Rabatt (außer bei massivem Überbestand)
         sells_well = a["recent_net"] >= best_limit
         if sells_well and (a["str_recent"] or 0) >= scfg["bestseller_min_str_recent"]:
@@ -324,6 +337,10 @@ def finish(a, scfg):
     rr = a["return_rate"] or 0
     a["profit_unit"] = net - float(a["ek"]) - rr * scfg["return_cost_eur"]
     a["potential"] = a["profit_unit"] * a["stock"]
+    # Verkauf unter Einkaufspreis (nur möglich, wenn ein Rabatt die Mindestmarge bewusst übergeht)
+    a["below_ek"] = bool(d) and a["factor"] is not None and a["factor"] < 1
+    if a["below_ek"] and not (a.get("reason") or "").startswith("⛔"):
+        a["reason"] = f"⛔ UNTER EK – Verlust {abs(net - float(a['ek'])):.2f} € je Teil, " + (a.get("reason") or "")
 
 
 def eur(x):
@@ -406,7 +423,11 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
         d = a["discount"]
         if d is not None:
             ws.cell(r, 5).fill = PatternFill("solid", fgColor=STEP_COLORS.get(d, "FFF8CBAD"))
-        if a.get("below_margin"):
+        if a.get("below_ek"):
+            for col in range(1, len(COLUMNS) + 1):
+                ws.cell(r, col).fill = PatternFill("solid", fgColor="FFC00000")
+                ws.cell(r, col).font = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
+        elif a.get("below_margin"):
             warn = PatternFill("solid", fgColor="FFFFC7CE")
             for col in range(1, len(COLUMNS) + 1):
                 ws.cell(r, col).fill = warn
@@ -457,11 +478,22 @@ def write_report(out, articles, scfg, coverage, brand, today, groups_cfg=None):
         c.number_format = ["@", "0", "#,##0", "#,##0 €", "#,##0 €", "#,##0 €", "0.00"][i - 1]
         c.border = Border(top=Side(style="medium", color=DARK))
     if unrated:
-        so.cell(r + 2, 1, f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Empfehlung“.").font = Font(name="Arial", size=10, color="FF7F7F7F")
+        so.cell(r + 5, 1, f"{len(unrated)} Artikel ohne Empfehlung (kein EK oder nicht in Shopify) – unten in „Sale-Empfehlung“.").font = Font(name="Arial", size=10, color="FF7F7F7F")
     below = [a for a in rated if a.get("below_margin")]
     if below:
-        c = so.cell(r + 1, 1, f"⚠ {len(below)} Artikel mit {scfg['steps'][0]} % unter der Mindestmarge – in „Sale-Empfehlung“ rot markiert.")
+        c = so.cell(r + 1, 1, f"⚠ {len(below)} Artikel unter der Mindestmarge – in „Sale-Empfehlung“ rot markiert.")
         c.font = Font(name="Arial", size=10, bold=True, color="FF9C0006")
+    loss = [a for a in rated if a.get("below_ek")]
+    if loss:
+        c = so.cell(r + 6, 1, f"⛔ {len(loss)} Artikel würden UNTER EK verkauft (Bestand {sum(a['stock'] for a in loss)}, "
+                              f"Verlust bei Abverkauf {eur(-sum(a['potential'] for a in loss))}) – dunkelrot markiert.")
+        c.font = Font(name="Arial", size=10, bold=True, color="FFC00000")
+    rest = [a for a in rated if a.get("restposten")]
+    if rest:
+        years = scfg["restposten_days"] / 365
+        c = so.cell(r + 2, 1, f"Restposten (≥ {years:.0f} Jahre im Shop, SKU-Reduktion): {len(rest)} Artikel mit {scfg['restposten_discount']} %, "
+                              f"Bestand {sum(a['stock'] for a in rest)}, Lagerwert EK {eur(sum(float(a['ek']) * a['stock'] for a in rest))}.")
+        c.font = Font(name="Arial", size=10, bold=True, color=DARK)
     if scfg.get("_excluded"):
         so.cell(r + 4, 1, "Ausgeschlossen (Artikelnummer beginnt mit): " + ", ".join(scfg["_excluded"])).font = Font(name="Arial", size=9, color="FF7F7F7F")
     so.cell(r + 3, 1, "Rohertrag = Sale-Preis netto − EK − erwartete Retourenkosten; „bei Abverkauf“ = wenn der ganze Bestand zum Sale-Preis verkauft wird.").font = Font(name="Arial", size=9, color="FF7F7F7F")
