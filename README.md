@@ -80,12 +80,17 @@ Existiert die Ausgabedatei schon, wird nicht überschrieben, sondern `_v2`, `_v3
   | Händlerpreis | `UNIT PRICE`, `Händlerpreis`, `EK`, `EK netto`, `Wholesale Price` | UNIT PRICE |
   | UVP | `UVP`, `RRP`, `VK`, `VK brutto`, `Retail Price` | RRP |
   | Bestand | `AVAILABLE`, `Bestand`, `Lager`, `Verfügbar`, `Stock`, `Qty` | graue Bestandszeile |
+  | EAN (optional) | `EAN`, `GTIN`, `EAN13`, `Barcode`, `UPC` | EAN-Zeile unter der Bestellzeile |
 
   Pflicht sind nur **SKU, Name, UVP und Bestand**:
   - **Kein EK-Preis in der CSV:** Das Script fragt nach dem **Markup** und rechnet EK = UVP ÷ Markup
     (z.B. 109,90 € ÷ 2,5 = 43,96 €). Ohne Abfragefenster: `--markup 2,5`.
   - **Spalte `Discount`** (auch `Rabatt`, `Nachlass`, …; Werte wie `30`, `30%` oder `0,3`): In der Liste stehen dann
-    zusätzlich **DISCOUNT** und **DISCOUNT PRICE** (= EK − Discount); `TOTAL` rechnet mit dem Discount-Preis.
+    zusätzlich **DISCOUNT** und **DISCOUNT PRICE** (= EK − Discount); `TOTAL` rechnet mit dem Discount-Preis. Ist die
+    Spalte leer, wird sie nicht ausgegeben.
+  - **Spalte `EAN`/`GTIN`:** Jeder Artikel bekommt eine dritte, graue Zeile unter der Bestellzeile mit der EAN je
+    Größe (als Text, damit Excel keine `4,07E+12` daraus macht). Ist die Spalte leer oder fehlt sie, gibt es keine
+    EAN-Zeile. Steht die EAN in der CSV schon als `4,07E+12`, ist sie nicht mehr lesbar und bleibt leer.
   - Alle Preise werden kaufmännisch auf zwei Nachkommastellen gerundet.
 
   Alle anderen Spalten werden ignoriert. Kommt ein Name doppelt vor (z.B. zweimal `UNIT PRICE`) und die Werte
