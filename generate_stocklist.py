@@ -216,7 +216,7 @@ def norm_header(text):
 
 
 ROLE_LABELS = {"sku": "SKU", "name": "Name", "uvp": "UVP/RRP", "unit_price": "Händlerpreis", "stock": "Bestand",
-               "discount": "Discount", "ek": "EK netto", "vk": "VK brutto (aktuell)"}
+               "discount": "Discount", "ean": "EAN", "ek": "EK netto", "vk": "VK brutto (aktuell)"}
 
 
 def column_letter_csv(i):
@@ -384,6 +384,9 @@ def build_articles(raw, positions, cfg, template_sizes, warnings, header_idx=0, 
                 "image": None, "sold": 0, "prices": {"unit_price": [], "uvp": [], "discount": []},
             }
         art.setdefault("names", []).append(name)
+        ean = clean_ean(val.get("ean", ""))
+        if ean:
+            art.setdefault("ean", {}).setdefault(size, ean)
         art["prices"]["unit_price"].append((price, size))
         art["prices"]["uvp"].append((uvp, size))
         art["prices"]["discount"].append((discount or Decimal(0), size))
@@ -1047,7 +1050,7 @@ def write_nav_links(ws, top_row, nav_rows, section_rows):
                 ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
 
 
-def write_search(ws, row, scfg, fixed_cols, helper_col, first_row, last_row):
+def write_search(ws, row, scfg, fixed_cols, helper_col, first_row, last_row, rows_per_article=2):
     """Suchfeld (SKU oder Namensteil) mit Sprung-Link; passende Artikel werden gelb markiert.
     Reine Formeln, keine Makros: funktioniert in Excel ohne Freigabe."""
     sku_l = get_column_letter(fixed_cols["sku"])
@@ -1100,10 +1103,15 @@ def write_search(ws, row, scfg, fixed_cols, helper_col, first_row, last_row):
     if res_end > res_col:
         ws.merge_cells(start_row=row, start_column=res_col, end_row=row, end_column=res_end)
 
-    # Treffer gelb markieren (beide Zeilen eines Artikels)
+    # Treffer gelb markieren (alle Zeilen eines Artikels: SKU/Name stehen in der obersten Zeile)
+    refs = ["{r}", "{p}", "{pp}"][:rows_per_article]
+    tests = [f'ISNUMBER(SEARCH({q},${sku_l}{ref}&" "&${name_l}{ref}))' for ref in refs]
+    if rows_per_article > 2:
+        # zwei Zeilen höher erst ab der dritten Datenzeile (sonst träfe es das Suchfeld selbst)
+        tests[2] = f"AND(ROW()>{first_row + 1},{tests[2]})"
+    tests = ",".join(tests)
     return FormulaRule(
-        formula=[f'AND({q}<>"",OR(ISNUMBER(SEARCH({q},$' + sku_l + "{r}&\" \"&$" + name_l + "{r})),"
-                 f"ISNUMBER(SEARCH({q},$" + sku_l + "{p}&\" \"&$" + name_l + "{p}))))"],
+        formula=[f'AND({q}<>"",OR({tests}))'],
         fill=PatternFill("solid", fgColor="FFFFF2A8", bgColor="FFFFF2A8"),
     )
 
@@ -1161,7 +1169,16 @@ def write_section_row(ws, row, title, last_col, n=None):
     ws.row_dimensions[row].height = 28
 
 
-def write_workbook(template_path, out_path, articles, cfg, today, brand, show_discount=False):
+def clean_ean(text):
+    """EAN/GTIN als Text: '4067434020857', auch '4067434020857.0' aus Excel; wissenschaftliche Schreibweise
+    (4,07E+12) ist nicht mehr rekonstruierbar und wird verworfen."""
+    text = (text or "").strip().replace(" ", "")
+    if re.fullmatch(r"\d+[.,]0+", text):
+        text = re.split(r"[.,]", text)[0]
+    return text if re.fullmatch(r"\d{8,14}", text) else ""
+
+
+def write_workbook(template_path, out_path, articles, cfg, today, brand, show_discount=False, show_ean=False):
     wb = load_workbook(template_path)
     ws = wb.worksheets[0]
     xc = cfg["excel"]
@@ -1209,8 +1226,12 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
     # Spaltenbreiten
     for role, col in layout["fixed_cols"].items():
         ws.column_dimensions[get_column_letter(col)].width = roles[role]["width"]
+    size_width = roles["size"]["width"]
+    if show_ean:
+        # 13-stellige EAN muss in die Größenspalte passen
+        size_width = max(size_width, xc.get("ean_size_col_width", 10))
     for col in size_col.values():
-        ws.column_dimensions[get_column_letter(col)].width = roles["size"]["width"]
+        ws.column_dimensions[get_column_letter(col)].width = size_width
     ws.column_dimensions[get_column_letter(q_col)].width = roles["quantity"]["width"]
     ws.column_dimensions[get_column_letter(t_col)].width = roles["total"]["width"]
 
@@ -1267,6 +1288,7 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
             row += 1
         current_set = art.get("set_label")
         top, bottom = row, row + 1
+        ean_row = bottom + 1 if show_ean else None
         ws.row_dimensions[top].height = layout["row_heights"]["top"]
         ws.row_dimensions[bottom].height = layout["row_heights"]["bottom"]
 
@@ -1336,15 +1358,17 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
             ws.add_data_validation(dv)
         if first_article_row is None:
             first_article_row = top
+        if ean_row:
+            write_ean_row(ws, ean_row, art, layout, roles, size_col, q_col, t_col, xc)
 
         for col in layout["fixed_cols"].values():
-            ws.merge_cells(start_row=top, start_column=col, end_row=bottom, end_column=col)
+            ws.merge_cells(start_row=top, start_column=col, end_row=ean_row or bottom, end_column=col)
         if art.get("image"):
             # Platz = Spaltenbreite x Höhe beider Zeilen, abzüglich Rand
             box_w = int(roles["image"]["width"] * 8 + 5) - 8  # ca. 8 px je Zeichen bei Aptos Narrow 12
             box_h = int((layout["row_heights"]["top"] + layout["row_heights"]["bottom"]) * 4 / 3) - 8
             add_image(ws, art["image"], top, layout["fixed_cols"]["image"], box_w, box_h)
-        row += 2
+        row += 3 if ean_row else 2
 
     last_row = row - 1
     if bar_rows:
@@ -1352,9 +1376,10 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
     if nav_rows:
         write_nav_links(ws, nav_top, nav_rows, section_rows)
     if scfg and first_article_row:
-        rule = write_search(ws, nav_top, scfg, layout["fixed_cols"], t_col + 1, r_first, last_row)
+        rule = write_search(ws, nav_top, scfg, layout["fixed_cols"], t_col + 1, r_first, last_row, 3 if show_ean else 2)
         rng = f"A{r_first}:{t_letter}{last_row}"
-        rule.formula = [rule.formula[0].replace("{r}", str(r_first)).replace("{p}", str(r_first - 1))]
+        formula = rule.formula[0]
+        rule.formula = [formula.replace("{r}", str(r_first)).replace("{pp}", str(r_first - 2)).replace("{p}", str(r_first - 1))]
         ws.conditional_formatting.add(rng, rule)
     if hints and first_article_row:
         # Legende direkt nach dem Titel (ab der Spalte hinter "Name"), damit sie auch bei wenigen Größen passt
@@ -1387,6 +1412,27 @@ def write_workbook(template_path, out_path, articles, cfg, today, brand, show_di
 
     wb.save(out_path)
     return sizes
+
+
+def write_ean_row(ws, row, art, layout, roles, size_col, q_col, t_col, xc):
+    """Dritte Zeile je Artikel: EAN je Größe (grau, klein, als Text), unter der Bestellzeile."""
+    ws.row_dimensions[row].height = xc.get("ean_row_height", 16)
+    eans = art.get("ean", {})
+    white = PatternFill("solid", fgColor="FFFFFFFF")
+    for role, col in layout["fixed_cols"].items():
+        apply(ws.cell(row, col), roles[role]["bottom"])
+    for s, col in list(size_col.items()) + [(None, q_col), (None, t_col)]:
+        c = ws.cell(row, col)
+        apply(c, roles["size"]["bottom"] if s else roles["quantity"]["bottom"])
+        c.fill = white
+        c.number_format = "@"
+        c.font = Font(name="Arial", size=8, color="FF595959")
+        c.alignment = Alignment(horizontal="center", vertical="center", shrink_to_fit=True)
+        if s and eans.get(s):
+            c.value = eans[s]
+    label = ws.cell(row, q_col)
+    label.value = xc.get("ean_row_label", "EAN")
+    label.font = Font(name="Arial", size=8, color="FFA6A6A6")
 
 
 def output_path(cfg, today, brand, pattern=None):
@@ -1472,7 +1518,11 @@ def main():
         show_discount = "discount" in positions and any(a.get("discount") for a in articles)
         if "discount" in positions and not show_discount:
             warnings.append("Discount-Spalte in der CSV ist leer – Liste ohne DISCOUNT/DISCOUNT PRICE.")
-        sizes = write_workbook(template_path, out, articles, cfg, today, brand, show_discount)
+        # EAN-Zeile nur, wenn die CSV eine EAN-/GTIN-Spalte mit Werten hat
+        show_ean = "ean" in positions and any(a.get("ean") for a in articles)
+        if "ean" in positions and not show_ean:
+            warnings.append("EAN-Spalte in der CSV ist leer – Liste ohne EAN-Zeile.")
+        sizes = write_workbook(template_path, out, articles, cfg, today, brand, show_discount, show_ean)
     except (StocklistError, OSError) as e:
         print("\nFEHLER – es wurde KEINE Stockliste erstellt.\n")
         print(e)
